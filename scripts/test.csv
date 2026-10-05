@@ -1,0 +1,5 @@
+id,name,age,salary,dropout
+1,Alice,25,50000,0
+2,Bob,30,,0
+3,Charlie,22,30000,1
+4,David,25,50000,0
