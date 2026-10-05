@@ -33,8 +33,8 @@ const EXT_MAP: Record<string, string> = {
   'image/gif': 'gif',
 };
 
-/** Public auction metadata is permanent and readable by anyone. Keep only fields
- * intended for a public listing; uploaded-file metadata stays in encrypted Redis. */
+/** Public auction metadata is readable by anyone. Keep only listing fields and
+ * an explicitly seller-approved, bounded dataset sample; other file metadata stays encrypted. */
 function publicAuctionMetadata(input: Record<string, unknown>) {
   const output: Record<string, unknown> = {};
   for (const key of ['name', 'description', 'image', 'startingPrice'] as const) {
@@ -57,6 +57,25 @@ function publicAuctionMetadata(input: Record<string, unknown>) {
     }
     if (source.assetType === 'software-license' && typeof source.licenseType === 'string') {
       asset.licenseType = source.licenseType;
+    }
+    if (source.assetType === 'dataset' && source.samplePreview && typeof source.samplePreview === 'object') {
+      const preview = source.samplePreview as Record<string, unknown>;
+      const rawColumns = Array.isArray(preview.columns) ? preview.columns : [];
+      const rawRows = Array.isArray(preview.rows) ? preview.rows.slice(0, 10) : [];
+      const columns = rawColumns.slice(0, 50).map((column) => typeof column === 'string' ? column.trim().slice(0, 80) : '');
+      if (
+        columns.length > 0 && columns.every(Boolean) &&
+        new Set(columns.map((column) => column.toLowerCase())).size === columns.length &&
+        rawRows.length > 0 && rawRows.every((row) => typeof row === 'object' && row !== null && !Array.isArray(row))
+      ) {
+        asset.samplePreview = {
+          columns,
+          rows: rawRows.map((row) => Object.fromEntries(columns.map((column) => {
+            const value = (row as Record<string, unknown>)[column];
+            return [column, typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? String(value).slice(0, 200) : ''];
+          }))),
+        };
+      }
     }
     output.asset = asset;
   }

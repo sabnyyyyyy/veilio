@@ -42,6 +42,7 @@ interface AuctionData {
 interface AssetMetadata {
   assetType?: string; deliveryMethod?: string;
   tokenStandard?: string; tokenAddress?: string; tokenId?: string; tokenAmount?: string; licenseType?: string;
+  samplePreview?: { columns: string[]; rows: Array<Record<string, string>> };
 }
 
 interface AuctionMetadata {
@@ -87,6 +88,21 @@ async function fetchIpfsJson(uri: string): Promise<AuctionMetadata | null> {
   }
 }
 
+function normalizeSamplePreview(value: unknown): AssetMetadata['samplePreview'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const preview = value as Record<string, unknown>;
+  if (!Array.isArray(preview.columns) || !Array.isArray(preview.rows)) return undefined;
+  const columns = preview.columns.filter((column): column is string => typeof column === 'string' && column.length > 0).slice(0, 50);
+  if (!columns.length || new Set(columns).size !== columns.length) return undefined;
+  const rows = preview.rows.slice(0, 10).filter((row) => typeof row === 'object' && row !== null && !Array.isArray(row)).map((row) =>
+    Object.fromEntries(columns.map((column) => {
+      const cell = (row as Record<string, unknown>)[column];
+      return [column, typeof cell === 'string' || typeof cell === 'number' || typeof cell === 'boolean' ? String(cell).slice(0, 200) : ''];
+    }))
+  );
+  return rows.length ? { columns, rows } : undefined;
+}
+
 /** Parse a contract/wallet error into a readable user-facing message. */
 function parseError(err: unknown): string {
   if (!(err instanceof Error)) return 'Transaction failed.';
@@ -109,6 +125,8 @@ function parseError(err: unknown): string {
     return 'Transaction rejected by wallet.';
   if (m.includes('insufficient') || m.includes('Insufficient'))
     return 'Insufficient BNB balance for gas.';
+  if (m.toLowerCase().includes('requested resource not available') || m.toLowerCase().includes('resource unavailable'))
+    return 'The BNB Testnet RPC could not prepare this reveal. Your bid secret is saved in this browser; retry shortly and keep using the same wallet.';
   if (m.includes('reverted on-chain'))
     return 'Transaction was reverted by the contract.';
   return m.length > 200 ? m.substring(0, 200) + '…' : m;
@@ -265,6 +283,7 @@ export default function AuctionDetailPage() {
                 tokenAmount: asset.tokenAmount,
               } : {}),
               ...(asset.assetType === 'software-license' ? { licenseType: asset.licenseType } : {}),
+              ...(asset.assetType === 'dataset' ? { samplePreview: normalizeSamplePreview(asset.samplePreview) } : {}),
             };
             setDatasetMeta(publicAsset);
             if (publicAsset.assetType === 'nft' && VEIL_V4_CONTRACT_ADDRESS) {
@@ -798,17 +817,36 @@ export default function AuctionDetailPage() {
                 <div className="text-xs text-[#A8A397] space-y-4 font-mono pt-2">
                   <div>
                     <div className="text-[#F5F2E8] font-bold mb-1">File:</div>
-                    <div className="text-[#A8A397] truncate">{datasetMeta.deliveryMethod === 'nft-transfer' ? 'Digital token asset' : 'Encrypted product file · details shown during inspection'}</div>
+                    <div className="text-[#A8A397] truncate">{datasetMeta.deliveryMethod === 'nft-transfer' ? 'Digital token asset' : datasetMeta.samplePreview ? 'Private dataset · sample preview below' : 'Encrypted product file · details shown during inspection'}</div>
                   </div>
                   <div>
                     <div className="text-[#F5F2E8] font-bold mb-1">Size:</div>
-                    <div className="text-[#A8A397]">{datasetMeta.deliveryMethod === 'nft-transfer' ? 'On-chain asset' : 'File details hidden until inspection'}</div>
+                    <div className="text-[#A8A397]">{datasetMeta.deliveryMethod === 'nft-transfer' ? 'On-chain asset' : datasetMeta.samplePreview ? 'Full file stays private until inspection' : 'File details hidden until inspection'}</div>
                   </div>
                   {datasetMeta.tokenAddress && <div><div className="text-[#F5F2E8] font-bold mb-1">NFT delivery:</div><div>{datasetMeta.tokenStandard} · Token #{datasetMeta.tokenId}{datasetMeta.tokenStandard === 'ERC-1155' ? ` · Amount ${datasetMeta.tokenAmount || '1'}` : ''}</div><div className="break-all">{datasetMeta.tokenAddress}</div><div className="mt-2 text-[#C9A45C]">On-chain status: {nftDeliveryState}</div></div>}
                   {datasetMeta.licenseType && <div><div className="text-[#F5F2E8] font-bold mb-1">License:</div><div>{datasetMeta.licenseType}</div></div>}
                   {privateDeliveryInfo?.accessInstructions && <div><div className="text-[#F5F2E8] font-bold mb-1">Private delivery instructions:</div><div className="whitespace-pre-wrap">{privateDeliveryInfo.accessInstructions}</div></div>}
                 </div>
               </div>
+            )}
+
+            {datasetMeta?.samplePreview && (
+              <section className="mt-6 p-5 rounded-2xl border border-[#C9A45C]/25 bg-[#151512] space-y-4">
+                <div>
+                  <h2 className="text-xs font-bold uppercase tracking-widest text-[#E6CC91]">Dataset Preview</h2>
+                  <p className="mt-2 text-xs text-[#A8A397]">{datasetMeta.samplePreview.rows.length} sample rows shared publicly by the seller. The full dataset stays private.</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse whitespace-nowrap text-xs">
+                    <thead><tr>{datasetMeta.samplePreview.columns.map((column) => <th key={column} className="pr-5 pb-3 text-[#F5F2E8] font-semibold border-b border-white/10">{column}</th>)}</tr></thead>
+                    <tbody>{datasetMeta.samplePreview.rows.map((row, rowIndex) => (
+                      <tr key={rowIndex} className="hover:bg-white/[0.02]">
+                        {datasetMeta.samplePreview!.columns.map((column) => <td key={column} className="max-w-64 truncate pr-5 py-2 text-[#A8A397] border-b border-white/5" title={row[column]}>{row[column]}</td>)}
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </section>
             )}
 
             {/* STATS */}
@@ -879,8 +917,8 @@ export default function AuctionDetailPage() {
                       </p>
                       <input
                         id="max-bid-input"
-                        type="number" min="0" step="0.01"
-                        placeholder="Enter maximum bid (BOT)"
+                        type="number" min="0.00001" step="0.00001"
+                        placeholder="Enter maximum bid (BNB)"
                         value={maxBidInput}
                         onChange={(e) => { setMaxBidInput(e.target.value); setCommitError(null); if (commitStatus === 'error') setCommitStatus('idle'); }}
                         disabled={commitStatus === 'confirming'}

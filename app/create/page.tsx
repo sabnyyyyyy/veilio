@@ -36,6 +36,7 @@ const publicClient = usePublicClient();
   const [assetDetails, setAssetDetails] = useState({ tokenStandard: 'ERC-721', tokenAddress: '', tokenId: '', tokenAmount: '1', licenseType: '', accessInstructions: '' });
   const [ipfsImageRes, setIpfsImageRes] = useState<IpfsUploadResponse | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [publishSamplePreview, setPublishSamplePreview] = useState(false);
 
   React.useEffect(() => {
     setMounted(true);
@@ -66,6 +67,7 @@ const publicClient = usePublicClient();
       recordCount: number;
       columnCount: number;
       columns: string[];
+      sample?: Record<string, unknown>[];
     };
   } | null>(null);
 
@@ -78,6 +80,7 @@ const publicClient = usePublicClient();
       return;
     }
     setDatasetFile(file);
+    setPublishSamplePreview(false);
     setIsUploadingDataset(true);
     setErrorMsg(null);
 
@@ -230,6 +233,12 @@ const publicClient = usePublicClient();
         asset: {
           assetType,
           deliveryMethod: assetType === 'nft' ? 'nft-transfer' : assetType === 'software-license' ? 'license-access' : 'encrypted-download',
+          ...(assetType === 'dataset' && publishSamplePreview && datasetInfo?.manifest?.columns?.length && datasetInfo.manifest.sample?.length ? {
+            samplePreview: {
+              columns: datasetInfo.manifest.columns,
+              rows: datasetInfo.manifest.sample.slice(0, 10),
+            },
+          } : {}),
           ...(assetType === 'nft' ? { tokenStandard: assetDetails.tokenStandard, tokenAddress: assetDetails.tokenAddress, tokenId: assetDetails.tokenId, tokenAmount: assetDetails.tokenAmount } : {}),
           ...(assetType === 'software-license' ? { licenseType: assetDetails.licenseType } : {}),
         }
@@ -381,8 +390,8 @@ try {
           <p className="mt-2 text-[#A8A397] text-base">
             List a digital asset for a private sealed-bid auction.
           </p>
-          <p className="mt-3 max-w-3xl text-xs leading-5 text-amber-200/80">
-            Auction titles, descriptions, cover images, prices, and NFT token references are public on-chain or on IPFS. Keep private information out of those fields. Uploaded file names, hashes, IDs, and contents are kept off public listing metadata.
+          <p className="mt-3 max-w-3xl text-xs leading-5 text-[#A8A397]">
+            Your uploaded file stays private. Auction details like the title, description, and price are public on-chain or on IPFS.
           </p>
         </div>
 
@@ -440,7 +449,7 @@ try {
 
             <div className="space-y-3">
               <label className="block text-[11px] uppercase tracking-widest text-[#A8A397]">Digital asset type</label>
-              <select value={assetType} onChange={(e) => { setAssetType(e.target.value as typeof assetType); setDatasetFile(null); setDatasetInfo(null); setErrorMsg(null); }} className="w-full px-4 py-3 bg-[#0A0A09] border border-white/10 text-[#F5F2E8]">
+              <select value={assetType} onChange={(e) => { setAssetType(e.target.value as typeof assetType); setDatasetFile(null); setDatasetInfo(null); setPublishSamplePreview(false); setErrorMsg(null); }} className="w-full px-4 py-3 bg-[#0A0A09] border border-white/10 text-[#F5F2E8]">
                 <option value="dataset">Dataset (CSV, JSON, Parquet)</option><option value="ai-model">AI model</option><option value="nft">NFT (ERC-721 / ERC-1155)</option><option value="3d-asset">3D asset / CAD</option><option value="software-license">Software / digital license</option><option value="digital-media">Digital media</option>
               </select>
               {assetType === 'nft' ? <>
@@ -452,8 +461,8 @@ try {
 
             {/* DATASET UPLOAD - HERO */}
             <div className="space-y-4">
-              {assetType !== 'nft' && <p className="border border-amber-300/20 bg-amber-300/[0.04] px-4 py-3 text-xs leading-5 text-amber-100/80">
-                Malware scanning sends the decrypted file from VEILIO to our HTTPS scanner provider (Verisys Antivirus API). The provider says files are deleted after scanning and are not shared. Do not upload confidential or regulated data unless you are authorized to share it with this provider.
+              {assetType !== 'nft' && <p className="text-xs leading-5 text-[#A8A397]">
+                Files are temporarily decrypted for a malware check by Verisys, then stored encrypted. Only upload data you’re authorized to share.
               </p>}
               
               {assetType === 'nft' ? <p className="p-5 border border-white/10 text-sm text-[#A8A397]">NFT listing uses the token contract and token ID above; no file upload is needed.</p> : !datasetInfo ? (
@@ -513,6 +522,16 @@ try {
                     <p><strong>Note:</strong> {assetType !== 'dataset' ? 'The uploaded file hash is recorded as the content integrity reference.' : datasetInfo.manifest?.format === 'PARQUET' ? 'Parquet is encrypted and integrity-checked; schema and record counts are not analyzed yet.' : 'Dataset inspection stats are part of the listing baseline.'}</p>
                   </div>
 
+                  {assetType === 'dataset' && datasetInfo.manifest?.sample?.length ? (
+                    <label className="flex items-start gap-3 p-4 border border-white/10 bg-[#151512] cursor-pointer">
+                      <input type="checkbox" checked={publishSamplePreview} onChange={(event) => setPublishSamplePreview(event.target.checked)} className="mt-1 accent-[#C9A45C]" />
+                      <span className="space-y-1">
+                        <span className="block text-sm text-[#F5F2E8]">Show a sample before bidding</span>
+                        <span className="block text-xs leading-5 text-[#A8A397]">Up to 10 rows and the first 50 column names become public with the listing and may remain on IPFS. Keep sensitive information out of the sample; the full dataset stays private.</span>
+                      </span>
+                    </label>
+                  ) : null}
+
                   <div className="bg-[#151512] p-4 border border-[#C9A45C]/20 text-center">
                     <h4 className="text-[#E6CC91] font-bold text-sm uppercase tracking-widest mb-1">Encrypted ✓</h4>
                     <p className="text-[#A8A397] text-xs font-mono mb-2">AES-256-GCM</p>
@@ -521,7 +540,7 @@ try {
                     </p>
                   </div>
 
-                  <button type="button" onClick={() => setDatasetInfo(null)} className="text-[10px] uppercase tracking-widest text-[#A8A397] hover:text-white transition-colors">
+                  <button type="button" onClick={() => { setDatasetInfo(null); setDatasetFile(null); setPublishSamplePreview(false); }} className="text-[10px] uppercase tracking-widest text-[#A8A397] hover:text-white transition-colors">
                     Remove & Upload Different File
                   </button>
                 </div>
@@ -641,6 +660,7 @@ try {
                     <div className="text-[#C9A45C] text-xs font-mono">✓ SHA-256 Recorded</div>
                     <div className="text-[#C9A45C] text-xs font-mono">✓ AES-256-GCM Encrypted</div>
                     <div className="text-rose-400 text-xs font-mono">🔒 Locked Until Settlement</div>
+                    {assetType === 'dataset' && <div className="text-[#A8A397] text-xs font-mono">{publishSamplePreview ? `✓ ${Math.min(10, datasetInfo.manifest?.recordCount || 0)}-row sample preview enabled` : 'Sample preview disabled'}</div>}
                   </div>}
 
                   <div className="pt-4 border-t border-white/5 grid grid-cols-2 gap-4">

@@ -134,11 +134,7 @@ export async function POST(req: NextRequest) {
       
       duplicateRate = recordCount > 0 ? duplicates / recordCount : 0;
       
-      if (recordCount > 100) {
-        sample = parsedRows.slice(0, 100);
-      } else if (recordCount > 10) {
-        sample = parsedRows.slice(0, 10);
-      }
+      sample = parsedRows.slice(0, 100);
     }
 
     if (format === 'CSV' && assetType === 'dataset') {
