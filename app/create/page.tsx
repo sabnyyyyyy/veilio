@@ -40,7 +40,7 @@ const publicClient = usePublicClient();
   React.useEffect(() => {
     setMounted(true);
   }, []);
-  const [startingPrice, setStartingPrice] = useState('500');
+  const [startingPrice, setStartingPrice] = useState('0.0001');
   
   const [commitDuration, setCommitDuration] = useState('24');
   const [revealDuration, setRevealDuration] = useState('1');
@@ -184,10 +184,6 @@ const publicClient = usePublicClient();
     }
     if (!VEIL_V3_CONTRACT_ADDRESS) {
       setErrorMsg('V3 contract is not configured in the environment. Please deploy first.');
-      return;
-    }
-    if (!ipfsImageRes) {
-      setErrorMsg('Please upload an image before creating the auction.');
       return;
     }
     if (assetType === 'nft' && !VEIL_V4_CONTRACT_ADDRESS) {
@@ -579,11 +575,12 @@ try {
               
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                 <div className="space-y-2">
-                  <label className="block text-[11px] uppercase tracking-widest text-[#A8A397]">Starting price (BOT)</label>
+                  <label className="block text-[11px] uppercase tracking-widest text-[#A8A397]">Starting price (BNB)</label>
                   <input
                     type="number"
                     required
-                    min="1"
+                    min="0.00001"
+                    step="0.00001"
                     value={startingPrice}
                     onChange={(e) => setStartingPrice(e.target.value)}
                     className="w-full px-4 py-3 bg-[#0A0A09] border border-white/10 rounded-none text-[#F5F2E8] focus:outline-none focus:border-[#C9A45C] transition-colors text-sm font-mono"
