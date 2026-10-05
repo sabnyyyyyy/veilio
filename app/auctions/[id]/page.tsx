@@ -15,7 +15,7 @@ import { computeCommitmentHash, generateRandomSecret } from '@/lib/commitment';
 import { getBidSecret, saveBidSecret } from '@/lib/secretStorage';
 import { bnbChain } from '@/lib/chain';
 import { decryptDatasetClientSide, triggerDownload, unpackEncryptedAssetBundle } from '@/lib/client/decryption';
-import { datasetDownloadMessage, datasetInspectMessage } from '@/lib/assetAuth';
+import { datasetDownloadMessage, datasetInspectMessage, datasetPreviewMessage } from '@/lib/assetAuth';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -154,6 +154,8 @@ export default function AuctionDetailPage() {
     metadataUri: string; imageUri: string; resolvedUrl: string;
   } | null>(null);
   const [datasetMeta, setDatasetMeta] = useState<AssetMetadata | undefined>(undefined);
+  const [previewPublishing, setPreviewPublishing] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [nftDeliveryState, setNftDeliveryState] = useState<string>('Checking escrow status...');
   const [inspectionData, setInspectionData] = useState<any>(null);
   const [privateDeliveryInfo, setPrivateDeliveryInfo] = useState<Record<string, string> | undefined>(undefined);
@@ -311,6 +313,43 @@ export default function AuctionDetailPage() {
   }, [publicClient, auctionId]);
 
   useEffect(() => { loadAuction(); }, [loadAuction]);
+
+  useEffect(() => {
+    if (!auctionId || datasetMeta?.assetType !== 'dataset' || datasetMeta.samplePreview) return;
+    let cancelled = false;
+    void fetch(`/api/datasets/preview?auctionId=${encodeURIComponent(auctionId)}`, { cache: 'no-store' })
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((data) => {
+        const preview = normalizeSamplePreview(data?.preview);
+        if (!cancelled && preview) setDatasetMeta((current) => current ? { ...current, samplePreview: preview } : current);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [auctionId, datasetMeta?.assetType, datasetMeta?.samplePreview]);
+
+  async function handlePublishPreview() {
+    if (!address || !isConnected) { setPreviewError('Connect the seller wallet first.'); return; }
+    setPreviewPublishing(true);
+    setPreviewError(null);
+    try {
+      const timestamp = Date.now();
+      const message = datasetPreviewMessage({ auctionId, address, timestamp });
+      const signature = await signMessageAsync({ message });
+      const response = await fetch('/api/datasets/preview', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auctionId, address, signature, timestamp }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not publish the preview.');
+      const preview = normalizeSamplePreview(data.preview);
+      if (!preview) throw new Error('No valid sample rows were returned.');
+      setDatasetMeta((current) => current ? { ...current, samplePreview: preview } : current);
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : 'Could not publish the preview.');
+    } finally {
+      setPreviewPublishing(false);
+    }
+  }
 
   useEffect(() => {
     if (datasetMeta?.assetType !== 'nft') return;
@@ -846,6 +885,17 @@ export default function AuctionDetailPage() {
                     ))}</tbody>
                   </table>
                 </div>
+              </section>
+            )}
+
+            {datasetMeta?.assetType === 'dataset' && !datasetMeta.samplePreview && isSeller && isCommitOpen && (
+              <section className="mt-6 p-5 rounded-2xl border border-[#C9A45C]/25 bg-[#151512]">
+                <h2 className="text-sm font-bold text-[#F5F2E8]">Pre-review is not published yet</h2>
+                <p className="mt-2 text-sm leading-6 text-[#A8A397]">Publish up to 10 sample rows so bidders can inspect the dataset before bidding. These rows and column names will be public; the full file stays private. Your wallet only signs an authorization message, with no gas fee.</p>
+                <button onClick={handlePublishPreview} disabled={previewPublishing} className="mt-4 rounded-lg bg-[#E6CC91] px-5 py-3 text-sm font-bold text-[#0A0A09] disabled:opacity-50">
+                  {previewPublishing ? 'Waiting for wallet…' : 'Publish 10-row pre-review'}
+                </button>
+                {previewError && <p role="alert" className="mt-3 text-sm text-red-400">{previewError}</p>}
               </section>
             )}
 

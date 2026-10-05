@@ -28,6 +28,7 @@ export interface DatasetRecord {
     sample?: unknown[];
     [key: string]: unknown;
   };
+  publicPreviewEnabled?: boolean;
   // The whole database, including this per-file key, is encrypted at rest.
   encryptionVersion: 'aes-256-gcm';
   keyBase64: string;
@@ -189,6 +190,22 @@ export async function getDatasetRecord(datasetId: string): Promise<DatasetRecord
   }
   const database = readDb();
   return database.records[datasetId] || null;
+}
+
+export async function updateDatasetRecord(record: DatasetRecord) {
+  if (isAssetRedisConfigured()) {
+    const result = await assetRedisCommand<number>([
+      'EVAL',
+      "if not redis.call('GET', KEYS[1]) then return 0 end; redis.call('SET', KEYS[1], ARGV[1]); return 1",
+      '1', redisRecordKey(record.datasetId), encryptStoredJson(record),
+    ]);
+    if (Number(result) !== 1) throw new Error('Asset record no longer exists.');
+    return;
+  }
+  const database = readDb();
+  if (!database.records[record.datasetId]) throw new Error('Asset record no longer exists.');
+  database.records[record.datasetId] = record;
+  writeDb(database);
 }
 
 export async function linkAuctionToDataset(datasetId: string, auctionId: string) {
