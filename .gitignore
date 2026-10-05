@@ -45,7 +45,8 @@ data/
 *.njsproj
 *.sln
 *.sw?
-.next/
-.local-product-e2e/.next-product-e2e/
-artifacts/
-cache/
+# Local test and e2e artifacts
+.hardhat-local-test-config/
+.hardhat-local-test-localapp/
+.local-product-e2e/
+
