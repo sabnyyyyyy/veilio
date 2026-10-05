@@ -13,8 +13,17 @@ import { scanAssetBuffer } from '../lib/server/malwareScan';
 import { unpackEncryptedAssetBundle } from '../lib/client/decryption';
 import { assetStorageConfigurationError } from '../lib/server/datasetDb';
 import { parseCsvRows } from '../lib/csvParser';
+import { contractReadErrorMessage } from '../lib/contractReadError';
 
 describe('VEILIO encrypted asset security', function () {
+  it('explains when the configured auction address has no compatible contract response', function () {
+    const address = '0x0000000000000000000000000000000000000001';
+    const message = contractReadErrorMessage(new Error('The contract function "auctionCount" returned no data ("0x").'), address);
+    expect(message).to.contain(address);
+    expect(message).to.contain('NEXT_PUBLIC_V4_CONTRACT_ADDRESS');
+    expect(contractReadErrorMessage(new Error('RPC timeout'), address)).to.contain('network connection');
+  });
+
   it('allows representative formats for every file-backed asset category', function () {
     const examples = [
       ['dataset', 'sales.csv'],

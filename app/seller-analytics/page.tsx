@@ -7,6 +7,8 @@ import { useAccount, usePublicClient } from 'wagmi';
 import WalletButton from '@/components/WalletButton';
 import { fetchUserAuctions, UserAuctionItem } from '@/lib/userAuctions';
 import { VEIL_V3_ABI, VEIL_V3_CONTRACT_ADDRESS } from '@/lib/contract';
+import { bnbChain } from '@/lib/chain';
+import { contractReadErrorMessage } from '@/lib/contractReadError';
 
 interface AnalyticsListing extends UserAuctionItem {
   views: number; dailyViews: Record<string, number>; reveals: number; winner: string; winningPrice: string; state: number; escrowStatus: string;
@@ -38,7 +40,7 @@ export default function SellerAnalyticsPage() {
         }));
         if (!cancelled) setRows(enriched);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load seller analytics.');
+        if (!cancelled) setError(contractReadErrorMessage(e, VEIL_V3_CONTRACT_ADDRESS));
       } finally { if (!cancelled) setLoading(false); }
     }
     void load();
@@ -63,7 +65,7 @@ export default function SellerAnalyticsPage() {
 
   return <div className="min-h-screen bg-[#0A0A09] pt-28 pb-20 px-6"><div className="max-w-7xl mx-auto space-y-8">
     <div className="flex flex-wrap justify-between items-end gap-4"><div><p className="text-xs uppercase tracking-widest text-[#C9A45C]">Seller workspace</p><h1 className="text-4xl font-bold mt-2">Analytics</h1><p className="text-sm text-[#A8A397] mt-2">Listing attention and auction outcomes from this wallet.</p></div><Link href="/my-auctions" className="px-4 py-3 border border-white/10 text-xs uppercase tracking-wider">Manage auctions</Link></div>
-    {loading ? <p className="text-[#A8A397]">Loading blockchain and view analytics…</p> : error ? <div className="p-4 border border-rose-500/30 text-rose-300">{error}</div> : <>
+    {loading ? <p className="text-[#A8A397]">Loading blockchain and view analytics…</p> : error ? <div role="alert" className="p-5 border border-rose-500/30 bg-rose-950/20 text-rose-200 space-y-3"><p>{error}</p><a className="inline-block text-xs uppercase tracking-wider text-[#E6CC91] underline underline-offset-4" href={`${bnbChain.blockExplorers.default.url}/address/${VEIL_V3_CONTRACT_ADDRESS}`} target="_blank" rel="noreferrer">Inspect configured contract ↗</a></div> : <>
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">{[['Unique listing viewers', totals.views], ['Auction participants', totals.bidders], ['Revealed bids', totals.reveals], ['Active auctions', totals.active], ['Completed sales', totals.completed], ['Seller proceeds*', `${totals.earned.toFixed(4)} BNB`]].map(([label, value]) => <div key={String(label)} className="p-5 bg-[#151512] border border-white/10"><div className="text-[10px] uppercase tracking-wider text-[#A8A397]">{label}</div><div className="text-xl font-bold mt-2 text-[#E6CC91]">{value}</div></div>)}</div>
       <div className="p-6 bg-[#151512] border border-white/10"><h2 className="text-xs uppercase tracking-widest text-[#A8A397] mb-5">New unique viewers · last 7 days</h2><div className="grid grid-cols-7 gap-3 items-end h-28">{dailyTrend.map(day=><div key={day.key} className="h-full flex flex-col justify-end items-center gap-2"><div className="text-[10px] text-[#E6CC91]">{day.count || ''}</div><div className="w-full max-w-12 bg-[#C9A45C]/80 rounded-t" style={{ height: `${Math.max(day.count ? 12 : 2, day.count / Math.max(...dailyTrend.map(d => d.count), 1) * 70)}%` }} /><div className="text-[10px] text-[#A8A397]">{day.label}</div></div>)}</div></div>
       <p className="text-[11px] text-[#A8A397]">*Estimated at 90% of completed winning prices. Pending withdrawals and refunds are not included.</p>

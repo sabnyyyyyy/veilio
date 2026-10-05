@@ -2,6 +2,8 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { bnbChain } from '@/lib/chain';
+import { VEIL_V3_CONTRACT_ADDRESS } from '@/lib/contract';
 
 export default function Footer() {
   return (
@@ -79,7 +81,7 @@ export default function Footer() {
                 97
               </li>
               <li>
-                <a href="https://testnet.botscan.org/address/0xE07bBaaF8524E9114C02cbbCb5F11041F3D4Be77" target="_blank" rel="noreferrer" className="hover:text-[#F5F2E8] transition-colors underline decoration-white/20 underline-offset-4">
+                <a href={`${bnbChain.blockExplorers.default.url}/address/${VEIL_V3_CONTRACT_ADDRESS}`} target="_blank" rel="noreferrer" className="hover:text-[#F5F2E8] transition-colors underline decoration-white/20 underline-offset-4">
                   Contract Explorer
                 </a>
               </li>
