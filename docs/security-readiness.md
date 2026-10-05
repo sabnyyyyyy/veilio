@@ -4,7 +4,7 @@
 
 - Signed uploads bound to the wallet, BNB Testnet, contract, file properties, and a one-time nonce.
 - File-type allowlists, filename sanitization, a 100 MB application limit, AES-256-GCM encryption, encrypted metadata/key database, and client-side SHA-256 integrity verification.
-- Production upload fail-closed checks for a private Vercel Blob store, HTTPS Redis REST (encrypted metadata, shared rate limit, and nonce consumption), a valid encryption key, and a reachable ClamAV scanner.
+- Production upload fail-closed checks for a private Vercel Blob store, HTTPS Redis REST (encrypted metadata, shared rate limit, and nonce consumption), a valid encryption key, and the managed HTTPS malware scanner.
 - Browser-side AES-256-GCM encryption and direct private Blob multipart uploads, bypassing Vercel Function request-size limits. The server scans decrypted bytes in memory and persists only ciphertext.
 - Streamed encrypted downloads to avoid JSON/base64 expansion, with winner/completed-state checks before releasing the file key.
 - Auction linking checks the on-chain seller and verifies that asset ID, hash, and type match the auction metadata.
@@ -24,7 +24,7 @@ Set these in the hosting provider's secret/configuration system, not in the brow
 - `ASSET_KEY_ENCRYPTION_KEY`: a stable random base64-encoded 32-byte key.
 - `BLOB_READ_WRITE_TOKEN`: automatically added when a private Vercel Blob store is connected to the project. The store must be created with **Private** access.
 - `ASSET_REDIS_REST_URL` and `ASSET_REDIS_REST_TOKEN`: HTTPS Redis REST credentials used for shared rate limits and replay protection.
-- `CLAMAV_HOST` and `CLAMAV_PORT`: reachable ClamAV daemon. Uploads fail closed in production if it is missing or unavailable.
+- `MALWARE_SCAN_API_KEY`: server-only API key for the Verisys Antivirus API. `MALWARE_SCAN_REGION` optionally selects `ap1` (Singapore, default), `eu1` (Germany), `gb1` (UK), or `us1` (USA). Uploads fail closed if the key is missing or the scanner is unavailable.
 - `PINATA_JWT` (or the Pinata API key pair): required for durable public auction metadata publication. Without it, the current metadata route falls back to a local URL unsuitable for a public listing.
 
 Keep the Redis database and encryption key available across deploys. Losing the key makes stored asset metadata and per-file keys unrecoverable. The private Blob objects contain ciphertext only; Redis holds AES-256-GCM encrypted records. Configure backups and a restore procedure for Redis and the encryption key before accepting valuable assets.
@@ -34,15 +34,15 @@ Keep the Redis database and encryption key available across deploys. Losing the 
 1. Create a Vercel Blob store with **Private** access and connect it to the production project. Vercel supplies `BLOB_READ_WRITE_TOKEN` to the selected environment.
 2. Connect an HTTPS Redis REST database and set `ASSET_REDIS_REST_URL` and `ASSET_REDIS_REST_TOKEN` for Production.
 3. Generate one stable key with `openssl rand -base64 32`; save it as `ASSET_KEY_ENCRYPTION_KEY` in Vercel Production. Keep a protected backup and never use a `NEXT_PUBLIC_` name.
-4. Provide `CLAMAV_HOST` and `CLAMAV_PORT` for a trusted scanner reachable from the Vercel Function. ClamAV's daemon protocol is not encrypted or authenticated by default; keep it on a private or otherwise network-restricted connection and do not expose an unauthenticated daemon publicly.
+4. Subscribe to Verisys Antivirus API and set `MALWARE_SCAN_API_KEY` as a server-only Production secret in Vercel. Set `MALWARE_SCAN_REGION=ap1` to use its Singapore endpoint. The API receives the decrypted file bytes over HTTPS for scanning. Its documentation says files are deleted immediately after scanning and are not shared with third parties; review the provider's current terms and data-processing terms before accepting private or regulated datasets. Its documented synchronous malware scan limit is 100 MB, matching VEILIO's upload limit.
 5. Keep the Pinata configuration for publishing auction metadata. Redeploy after configuring the variables, then test upload, inspection, and download with dummy assets before accepting valuable files.
 
 Do not set `VEILIO_ASSET_STORAGE_DIR` on Vercel; the production asset path uses private Blob plus Redis instead of the Function's ephemeral filesystem.
 
 ## Verification status
 
-- Local test suite: 81 passing, including contract regression tests, upload authorization/storage configuration, mock ClamAV behavior, Redis limiter behavior, asset encryption, and streamed-download bundle parsing.
+- Existing test suite coverage includes contract regression tests, upload authorization/storage configuration, Redis limiter behavior, asset encryption, and streamed-download bundle parsing. Managed scanner provider integration is now covered by a mock API test; its live provider credentials and response still need verification.
 - TypeScript check and Next.js production build passed for the Vercel Blob upload changes.
 - BNB Testnet read-only preflight confirmed chain ID 97, contract bytecode at the configured address, matching application/testnet contract settings, and funded seller/bidder test wallets.
 - No Testnet transactions were sent in this pass. Pinata credentials are not configured, so the application would publish metadata to an instance-local URL; creating permanent public-chain test auctions with those URIs would be misleading.
-- The real Vercel Blob callback path, production Redis, reachable ClamAV service, restore/key-rotation drill, independent contract audit, and full testnet upload-to-settlement E2E still need verification after the required production services are connected.
+- The real Vercel Blob callback path, production Redis, managed scanner account, restore/key-rotation drill, independent contract audit, and full testnet upload-to-settlement E2E still need verification after the required production services are connected.

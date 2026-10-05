@@ -64,7 +64,7 @@ export function assetStorageConfigurationError(): string | null {
   if (process.env.NODE_ENV !== 'production') return null;
   if (!process.env.BLOB_READ_WRITE_TOKEN) return 'Private Vercel Blob is not configured. Connect a private Blob store to this Vercel project.';
   if (!isAssetRedisConfigured()) return 'Persistent asset metadata storage is not configured. Connect an HTTPS Redis REST database.';
-  if (!process.env.CLAMAV_HOST) return 'Malware scanning is not configured. Set a reachable CLAMAV_HOST before accepting product files.';
+  if (!process.env.MALWARE_SCAN_API_KEY) return 'Managed malware scanning is not configured. Set MALWARE_SCAN_API_KEY before accepting product files.';
   return null;
 }
 

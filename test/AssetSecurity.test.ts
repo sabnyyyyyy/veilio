@@ -1,6 +1,5 @@
 import { expect } from 'chai';
 import crypto from 'crypto';
-import net from 'node:net';
 import { verifyMessage } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { assetUploadMessage } from '../lib/assetAuth';
@@ -158,21 +157,21 @@ describe('VEILIO encrypted asset security', function () {
     const previousBlobToken = process.env.BLOB_READ_WRITE_TOKEN;
     const previousRedisUrl = process.env.ASSET_REDIS_REST_URL;
     const previousRedisToken = process.env.ASSET_REDIS_REST_TOKEN;
-    const previousClamHost = process.env.CLAMAV_HOST;
+    const previousScannerKey = process.env.MALWARE_SCAN_API_KEY;
     process.env.NODE_ENV = 'production';
     try {
       delete process.env.BLOB_READ_WRITE_TOKEN;
       process.env.ASSET_REDIS_REST_URL = 'https://redis.example.test';
       process.env.ASSET_REDIS_REST_TOKEN = 'test-token';
-      process.env.CLAMAV_HOST = 'clamav.example.test';
+      process.env.MALWARE_SCAN_API_KEY = 'test-api-key';
       expect(assetStorageConfigurationError()).to.contain('Private Vercel Blob');
       process.env.BLOB_READ_WRITE_TOKEN = 'blob-token';
       delete process.env.ASSET_REDIS_REST_URL;
       expect(assetStorageConfigurationError()).to.contain('Redis REST');
       process.env.ASSET_REDIS_REST_URL = 'https://redis.example.test';
-      delete process.env.CLAMAV_HOST;
+      delete process.env.MALWARE_SCAN_API_KEY;
       expect(assetStorageConfigurationError()).to.contain('Malware scanning');
-      process.env.CLAMAV_HOST = 'clamav.example.test';
+      process.env.MALWARE_SCAN_API_KEY = 'test-api-key';
       expect(assetStorageConfigurationError()).to.equal(null);
     } finally {
       if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
@@ -183,40 +182,35 @@ describe('VEILIO encrypted asset security', function () {
       else process.env.ASSET_REDIS_REST_URL = previousRedisUrl;
       if (previousRedisToken === undefined) delete process.env.ASSET_REDIS_REST_TOKEN;
       else process.env.ASSET_REDIS_REST_TOKEN = previousRedisToken;
-      if (previousClamHost === undefined) delete process.env.CLAMAV_HOST;
-      else process.env.CLAMAV_HOST = previousClamHost;
+      if (previousScannerKey === undefined) delete process.env.MALWARE_SCAN_API_KEY;
+      else process.env.MALWARE_SCAN_API_KEY = previousScannerKey;
     }
   });
 
-  it('fails closed when ClamAV detects malware and accepts a clean scan', async function () {
-    const previousHost = process.env.CLAMAV_HOST;
-    const previousPort = process.env.CLAMAV_PORT;
+  it('fails closed when the managed scanner detects malware and accepts a clean scan', async function () {
+    const previousKey = process.env.MALWARE_SCAN_API_KEY;
+    const previousRegion = process.env.MALWARE_SCAN_REGION;
     const previousNodeEnv = process.env.NODE_ENV;
-    process.env.CLAMAV_HOST = '127.0.0.1';
-    const runScanner = async (reply: string) => {
-      const server = net.createServer((socket) => {
-        let request = Buffer.alloc(0);
-        socket.on('data', (chunk) => {
-          request = Buffer.concat([request, chunk]);
-          if (request.length >= 4 && request.subarray(-4).every((byte) => byte === 0)) socket.end(reply + '\0');
-        });
-      });
-      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-      const addressInfo = server.address();
-      if (!addressInfo || typeof addressInfo === 'string') throw new Error('Could not start fake ClamAV server.');
-      process.env.CLAMAV_PORT = String(addressInfo.port);
-      try { return await scanAssetBuffer(Buffer.from('dummy file')); }
-      finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
-    };
+    const previousFetch = globalThis.fetch;
+    process.env.MALWARE_SCAN_API_KEY = 'test-api-key';
+    process.env.MALWARE_SCAN_REGION = 'ap1';
+    globalThis.fetch = (async (input, init) => {
+      expect(String(input)).to.equal('https://ap1.api.av.ionxsolutions.com/v1/malware/scan/file');
+      expect(new Headers(init?.headers).get('X-API-Key')).to.equal('test-api-key');
+      expect(init?.body).to.be.instanceOf(FormData);
+      expect((init?.body as FormData).get('file')).to.be.instanceOf(Blob);
+      return new Response(JSON.stringify({ status: 'clean' }), { status: 201 });
+    }) as typeof fetch;
     try {
-      expect(await runScanner('stream: OK')).to.equal('clean');
+      expect(await scanAssetBuffer(Buffer.from('dummy file'))).to.equal('clean');
+      globalThis.fetch = (async () => new Response(JSON.stringify({ status: 'threat' }), { status: 201 })) as typeof fetch;
       try {
-        await runScanner('stream: Eicar-Test-Signature FOUND');
+        await scanAssetBuffer(Buffer.from('infected file'));
         expect.fail('infected file should be rejected');
       } catch (error) {
         expect((error as Error).message).to.contain('identified as malware');
       }
-      delete process.env.CLAMAV_HOST;
+      delete process.env.MALWARE_SCAN_API_KEY;
       process.env.NODE_ENV = 'production';
       try {
         await scanAssetBuffer(Buffer.from('unscanned'));
@@ -225,10 +219,11 @@ describe('VEILIO encrypted asset security', function () {
         expect((error as Error).message).to.contain('not configured');
       }
     } finally {
-      if (previousHost === undefined) delete process.env.CLAMAV_HOST;
-      else process.env.CLAMAV_HOST = previousHost;
-      if (previousPort === undefined) delete process.env.CLAMAV_PORT;
-      else process.env.CLAMAV_PORT = previousPort;
+      globalThis.fetch = previousFetch;
+      if (previousKey === undefined) delete process.env.MALWARE_SCAN_API_KEY;
+      else process.env.MALWARE_SCAN_API_KEY = previousKey;
+      if (previousRegion === undefined) delete process.env.MALWARE_SCAN_REGION;
+      else process.env.MALWARE_SCAN_REGION = previousRegion;
       if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = previousNodeEnv;
     }

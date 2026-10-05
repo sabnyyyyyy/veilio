@@ -456,6 +456,9 @@ try {
 
             {/* DATASET UPLOAD - HERO */}
             <div className="space-y-4">
+              {assetType !== 'nft' && <p className="border border-amber-300/20 bg-amber-300/[0.04] px-4 py-3 text-xs leading-5 text-amber-100/80">
+                Malware scanning sends the decrypted file from VEILIO to our HTTPS scanner provider (Verisys Antivirus API). The provider says files are deleted after scanning and are not shared. Do not upload confidential or regulated data unless you are authorized to share it with this provider.
+              </p>}
               
               {assetType === 'nft' ? <p className="p-5 border border-white/10 text-sm text-[#A8A397]">NFT listing uses the token contract and token ID above; no file upload is needed.</p> : !datasetInfo ? (
                 <div className="relative p-12 border border-dashed border-[#A8A397]/40 hover:border-[#C9A45C] rounded-none bg-[#0A0A09] transition-all flex flex-col items-center justify-center text-center space-y-4">
