@@ -33,6 +33,36 @@ const EXT_MAP: Record<string, string> = {
   'image/gif': 'gif',
 };
 
+/** Public auction metadata is permanent and readable by anyone. Keep only fields
+ * intended for a public listing; uploaded-file metadata stays in encrypted Redis. */
+function publicAuctionMetadata(input: Record<string, unknown>) {
+  const output: Record<string, unknown> = {};
+  for (const key of ['name', 'description', 'image', 'startingPrice'] as const) {
+    const value = input[key];
+    if (typeof value === 'string') output[key] = value;
+  }
+
+  const source = (input.asset && typeof input.asset === 'object' ? input.asset : input.dataset) as Record<string, unknown> | undefined;
+  if (source && typeof source === 'object') {
+    const asset: Record<string, unknown> = {};
+    for (const key of ['assetType', 'deliveryMethod'] as const) {
+      if (typeof source[key] === 'string') asset[key] = source[key];
+    }
+    // NFT identifiers and the declared license category are public listing facts.
+    // Never copy filenames, file IDs, hashes, sizes, manifests, or delivery secrets.
+    if (source.assetType === 'nft') {
+      for (const key of ['tokenStandard', 'tokenAddress', 'tokenId', 'tokenAmount'] as const) {
+        if (typeof source[key] === 'string') asset[key] = source[key];
+      }
+    }
+    if (source.assetType === 'software-license' && typeof source.licenseType === 'string') {
+      asset.licenseType = source.licenseType;
+    }
+    output.asset = asset;
+  }
+  return output;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const contentType = req.headers.get('content-type') || '';
@@ -47,6 +77,11 @@ export async function POST(req: NextRequest) {
       if (!metadata) {
         return NextResponse.json({ error: 'Missing metadata object' }, { status: 400 });
       }
+
+      if (typeof metadata !== 'object' || Array.isArray(metadata)) {
+        return NextResponse.json({ error: 'Invalid metadata object' }, { status: 400 });
+      }
+      const publicMetadata = publicAuctionMetadata(metadata as Record<string, unknown>);
 
       // Try Pinata first
       const pinataJwt = process.env.PINATA_JWT;
@@ -69,7 +104,7 @@ export async function POST(req: NextRequest) {
             method: 'POST',
             headers,
             body: JSON.stringify({
-              pinataContent: metadata,
+              pinataContent: publicMetadata,
               pinataMetadata: {
                 name: `VEILIO_Metadata_${Date.now()}.json`,
               },
@@ -95,7 +130,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Fallback: store metadata as a local JSON file in /public/uploads/
-      const jsonStr = JSON.stringify(metadata);
+      const jsonStr = JSON.stringify(publicMetadata);
       const hash = crypto.createHash('sha256').update(jsonStr).digest('hex').substring(0, 32);
       const filename = `meta_${hash}.json`;
       const filePath = path.join(UPLOADS_DIR, filename);

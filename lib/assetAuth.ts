@@ -20,6 +20,7 @@ export function assetUploadMessage(input: {
 }) {
   return [
     domain('upload'),
+    'Purpose: Off-chain upload authorization only; this signature does not submit a blockchain transaction.',
     `Wallet: ${input.address.toLowerCase()}`,
     `Asset type: ${input.assetType}`,
     `File: ${input.fileName}`,

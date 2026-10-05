@@ -234,15 +234,6 @@ const publicClient = usePublicClient();
         asset: {
           assetType,
           deliveryMethod: assetType === 'nft' ? 'nft-transfer' : assetType === 'software-license' ? 'license-access' : 'encrypted-download',
-          ...(datasetInfo ? {
-            datasetId: datasetInfo.datasetId,
-            fileName: datasetInfo.fileName,
-            size: datasetInfo.size,
-            fileHashHex: datasetInfo.fileHashHex,
-            mimeType: datasetInfo.mimeType,
-            // Dataset samples are private inspection data, never public listing metadata.
-            manifest: { ...datasetInfo.manifest, sample: undefined },
-          } : {}),
           ...(assetType === 'nft' ? { tokenStandard: assetDetails.tokenStandard, tokenAddress: assetDetails.tokenAddress, tokenId: assetDetails.tokenId, tokenAmount: assetDetails.tokenAmount } : {}),
           ...(assetType === 'software-license' ? { licenseType: assetDetails.licenseType } : {}),
         }
@@ -393,6 +384,9 @@ try {
           </h1>
           <p className="mt-2 text-[#A8A397] text-base">
             List a digital asset for a private sealed-bid auction.
+          </p>
+          <p className="mt-3 max-w-3xl text-xs leading-5 text-amber-200/80">
+            Auction titles, descriptions, cover images, prices, and NFT token references are public on-chain or on IPFS. Keep private information out of those fields. Uploaded file names, hashes, IDs, and contents are kept off public listing metadata.
           </p>
         </div>
 

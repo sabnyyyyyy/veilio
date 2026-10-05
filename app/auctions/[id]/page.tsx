@@ -40,8 +40,8 @@ interface AuctionData {
 }
 
 interface AssetMetadata {
-  assetType?: string; deliveryMethod?: string; fileName?: string; size?: number; fileHashHex?: string; mimeType?: string;
-  manifest?: any; tokenStandard?: string; tokenAddress?: string; tokenId?: string; tokenAmount?: string; licenseType?: string; accessInstructions?: string;
+  assetType?: string; deliveryMethod?: string;
+  tokenStandard?: string; tokenAddress?: string; tokenId?: string; tokenAmount?: string; licenseType?: string;
 }
 
 interface AuctionMetadata {
@@ -255,8 +255,19 @@ export default function AuctionDetailPage() {
           if (metadata.image) imageUri = metadata.image;
           const asset = metadata.asset || metadata.dataset;
           if (asset) {
-            setDatasetMeta(asset);
-            if (asset.assetType === 'nft' && VEIL_V4_CONTRACT_ADDRESS) {
+            const publicAsset: AssetMetadata = {
+              assetType: asset.assetType,
+              deliveryMethod: asset.deliveryMethod,
+              ...(asset.assetType === 'nft' ? {
+                tokenStandard: asset.tokenStandard,
+                tokenAddress: asset.tokenAddress,
+                tokenId: asset.tokenId,
+                tokenAmount: asset.tokenAmount,
+              } : {}),
+              ...(asset.assetType === 'software-license' ? { licenseType: asset.licenseType } : {}),
+            };
+            setDatasetMeta(publicAsset);
+            if (publicAsset.assetType === 'nft' && VEIL_V4_CONTRACT_ADDRESS) {
               try {
                 const nft = await publicClient.readContract({ address: VEIL_V3_CONTRACT_ADDRESS, abi: VEIL_V3_ABI, functionName: 'nftAssets', args: [BigInt(auctionId)] }) as readonly [number, string, bigint, bigint, boolean, boolean];
                 setNftDeliveryState(nft[5] ? 'Delivered to the winning bidder' : nft[4] ? 'Held in VEILIO escrow' : 'Not currently held in escrow');
@@ -787,15 +798,15 @@ export default function AuctionDetailPage() {
                 <div className="text-xs text-[#A8A397] space-y-4 font-mono pt-2">
                   <div>
                     <div className="text-[#F5F2E8] font-bold mb-1">File:</div>
-                    <div className="text-[#A8A397] truncate">{datasetMeta.fileName || 'Digital token asset'}</div>
+                    <div className="text-[#A8A397] truncate">{datasetMeta.deliveryMethod === 'nft-transfer' ? 'Digital token asset' : 'Encrypted product file · details shown during inspection'}</div>
                   </div>
                   <div>
                     <div className="text-[#F5F2E8] font-bold mb-1">Size:</div>
-                    <div className="text-[#A8A397]">{datasetMeta.size !== undefined ? `${(datasetMeta.size / 1024 / 1024).toFixed(2)} MB` : 'On-chain asset'}</div>
+                    <div className="text-[#A8A397]">{datasetMeta.deliveryMethod === 'nft-transfer' ? 'On-chain asset' : 'File details hidden until inspection'}</div>
                   </div>
                   {datasetMeta.tokenAddress && <div><div className="text-[#F5F2E8] font-bold mb-1">NFT delivery:</div><div>{datasetMeta.tokenStandard} · Token #{datasetMeta.tokenId}{datasetMeta.tokenStandard === 'ERC-1155' ? ` · Amount ${datasetMeta.tokenAmount || '1'}` : ''}</div><div className="break-all">{datasetMeta.tokenAddress}</div><div className="mt-2 text-[#C9A45C]">On-chain status: {nftDeliveryState}</div></div>}
                   {datasetMeta.licenseType && <div><div className="text-[#F5F2E8] font-bold mb-1">License:</div><div>{datasetMeta.licenseType}</div></div>}
-                  {datasetMeta.accessInstructions && <div><div className="text-[#F5F2E8] font-bold mb-1">Delivery instructions:</div><div className="whitespace-pre-wrap">{datasetMeta.accessInstructions}</div></div>}
+                  {privateDeliveryInfo?.accessInstructions && <div><div className="text-[#F5F2E8] font-bold mb-1">Private delivery instructions:</div><div className="whitespace-pre-wrap">{privateDeliveryInfo.accessInstructions}</div></div>}
                 </div>
               </div>
             )}
@@ -1061,7 +1072,7 @@ export default function AuctionDetailPage() {
                               ) : (
                                 <div className="text-sm font-mono text-[#A8A397]">
                                   <div className="text-[#F5F2E8] mb-4">
-                                    {datasetMeta?.fileName || datasetMeta?.assetType || 'Digital asset'}
+                                    {datasetMeta?.assetType || 'Digital asset'}
                                   </div>
                                   {privateDeliveryInfo?.accessInstructions && <div className="mb-4 p-4 border border-[#C9A45C]/20 bg-[#C9A45C]/5"><div className="text-[#E6CC91] text-[10px] uppercase tracking-widest mb-2">Private delivery instructions</div><div className="whitespace-pre-wrap">{privateDeliveryInfo.accessInstructions}</div></div>}
                                   <hr className="border-white/10 mb-4" />
@@ -1072,12 +1083,6 @@ export default function AuctionDetailPage() {
                                     <div>Duplicates: {(inspectionData.duplicateRate * 100).toFixed(2)}%</div>
                                   </div>}
 
-                                  {datasetMeta?.fileHashHex && (
-                                    <div className="mb-4">
-                                      <div className="text-[#F5F2E8] mb-1 tracking-widest uppercase text-[10px]">SHA-256</div>
-                                      <div className="truncate">{datasetMeta.fileHashHex}</div>
-                                    </div>
-                                  )}
                                   <hr className="border-white/10 my-4" />
 
                                   {inspectionData.schema && inspectionData.schema.length > 0 && (
@@ -1132,7 +1137,7 @@ export default function AuctionDetailPage() {
                               {showRefundForm ? (
                                 <RefundForm 
                                   auctionId={auctionId} 
-                                  listingCriteria={datasetMeta?.manifest || {}} 
+                                  listingCriteria={inspectionData || {}}
                                   onSubmit={async (hash) => {
                                     await handleRequestRefund(hash);
                                   }}

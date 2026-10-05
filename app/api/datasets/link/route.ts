@@ -92,9 +92,9 @@ export async function POST(req: NextRequest) {
 
     const metadata = await loadAuctionMetadata(String(raw[4]));
     const asset = metadata.asset as Record<string, unknown> | undefined;
-    if (!asset || asset.datasetId !== datasetId || asset.fileHashHex !== record.fileHashHex || asset.assetType !== (record.assetType || 'dataset')) {
+    if (!asset || asset.assetType !== (record.assetType || 'dataset')) {
       auditAssetEvent({ action: 'link', result: 'denied', assetType: record.assetType, sizeBytes: record.size, auctionId: id, walletAddress: String(address), reasonCode: 'metadata_mismatch' });
-      return NextResponse.json({ error: 'On-chain auction metadata does not match the uploaded asset ID, hash, and type.' }, { status: 409 });
+      return NextResponse.json({ error: 'Public auction metadata does not match the uploaded asset type.' }, { status: 409 });
     }
 
     await linkAuctionToDataset(datasetId, auctionId);
