@@ -12,6 +12,17 @@ import WalletButton from '@/components/WalletButton';
 import ImageUploader from '@/components/ImageUploader';
 import { assetUploadMessage, datasetLinkMessage } from '@/lib/assetAuth';
 import { sanitizeAssetFileName } from '@/lib/assetPolicy';
+import { upload as uploadPrivateBlob } from '@vercel/blob/client';
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
+  return window.btoa(binary);
+}
+
+function bytesToHex(bytes: Uint8Array) {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
 
 export default function CreateAuctionPage() {
   const { address, isConnected } = useAccount();
@@ -74,28 +85,76 @@ const publicClient = usePublicClient();
       const fileName = sanitizeAssetFileName(file.name);
       const timestamp = Date.now();
       const nonce = crypto.randomUUID();
-      const signature = await signMessageAsync({ message: assetUploadMessage({ address, assetType, fileName, fileSize: file.size, timestamp, nonce }) });
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('assetType', assetType);
-      formData.append('walletAddress', address);
-      formData.append('timestamp', String(timestamp));
-      formData.append('nonce', nonce);
-      formData.append('signature', signature);
-      if (assetType === 'software-license') {
-        formData.append('licenseType', assetDetails.licenseType);
-        formData.append('accessInstructions', assetDetails.accessInstructions);
+      const datasetId = crypto.randomUUID();
+
+      if (process.env.NODE_ENV !== 'production') {
+        const signature = await signMessageAsync({ message: assetUploadMessage({ address, assetType, fileName, fileSize: file.size, timestamp, nonce }) });
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('assetType', assetType);
+        formData.append('walletAddress', address);
+        formData.append('timestamp', String(timestamp));
+        formData.append('nonce', nonce);
+        formData.append('signature', signature);
+        if (assetType === 'software-license') {
+          formData.append('licenseType', assetDetails.licenseType);
+          formData.append('accessInstructions', assetDetails.accessInstructions);
+        }
+        const res = await fetch('/api/datasets/upload/local', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to upload asset');
+        setDatasetInfo(data.dataset);
+        return;
       }
-      
-      const res = await fetch('/api/datasets/upload', {
-        method: 'POST',
-        body: formData,
+
+      setStatusStep('Encrypting asset in your browser...');
+      const plainBytes = await file.arrayBuffer();
+      const fileHashHex = bytesToHex(new Uint8Array(await crypto.subtle.digest('SHA-256', plainBytes)));
+      const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+      const ivBytes = crypto.getRandomValues(new Uint8Array(12));
+      const cryptoKey = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt']);
+      const ciphertextWithTag = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: ivBytes, tagLength: 128 }, cryptoKey, plainBytes));
+      const authTag = ciphertextWithTag.subarray(ciphertextWithTag.length - 16);
+      const encryptedUpload = new Blob([ciphertextWithTag], { type: 'application/octet-stream' });
+      const signature = await signMessageAsync({ message: assetUploadMessage({ address, assetType, fileName, fileSize: file.size, timestamp, nonce, datasetId, fileHashHex }) });
+      const clientPayload = JSON.stringify({
+        datasetId,
+        walletAddress: address,
+        assetType,
+        fileName,
+        fileSize: file.size,
+        timestamp,
+        nonce,
+        signature,
+        fileHashHex,
+        keyBase64: bytesToBase64(keyBytes),
+        ivBase64: bytesToBase64(ivBytes),
+        licenseType: assetType === 'software-license' ? assetDetails.licenseType : undefined,
+        accessInstructions: assetType === 'software-license' ? assetDetails.accessInstructions : undefined,
       });
-      
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to upload dataset');
-      
-      setDatasetInfo(data.dataset);
+
+      setStatusStep('Uploading encrypted asset to private storage...');
+      await uploadPrivateBlob(`veilio/incoming/${datasetId}.enc`, encryptedUpload, {
+        access: 'private',
+        contentType: 'application/octet-stream',
+        handleUploadUrl: '/api/datasets/upload',
+        clientPayload,
+        multipart: true,
+        onUploadProgress: ({ percentage }) => setStatusStep(`Uploading encrypted asset... ${Math.floor(percentage)}%`),
+      });
+
+      setStatusStep('Scanning and verifying encrypted asset...');
+      for (let attempt = 0; attempt < 120; attempt++) {
+        const statusResponse = await fetch(`/api/datasets/upload?id=${encodeURIComponent(datasetId)}&address=${encodeURIComponent(address)}`, { cache: 'no-store' });
+        const statusData = await statusResponse.json();
+        if (statusData.status === 'ready') {
+          setDatasetInfo(statusData.dataset);
+          return;
+        }
+        if (statusData.status === 'rejected' || !statusResponse.ok) throw new Error(statusData.error || 'Asset verification failed.');
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      }
+      throw new Error('Asset verification is taking longer than expected. Keep this page open and retry selecting the file if it does not finish.');
     } catch (err: any) {
       console.error(err);
       setErrorMsg(err.message || 'Error uploading dataset');
@@ -391,7 +450,7 @@ try {
 
             <div className="space-y-3">
               <label className="block text-[11px] uppercase tracking-widest text-[#A8A397]">Digital asset type</label>
-              <select value={assetType} onChange={(e) => { setAssetType(e.target.value as typeof assetType); setDatasetFile(null); setDatasetInfo(null); }} className="w-full px-4 py-3 bg-[#0A0A09] border border-white/10 text-[#F5F2E8]">
+              <select value={assetType} onChange={(e) => { setAssetType(e.target.value as typeof assetType); setDatasetFile(null); setDatasetInfo(null); setErrorMsg(null); }} className="w-full px-4 py-3 bg-[#0A0A09] border border-white/10 text-[#F5F2E8]">
                 <option value="dataset">Dataset (CSV, JSON, Parquet)</option><option value="ai-model">AI model</option><option value="nft">NFT (ERC-721 / ERC-1155)</option><option value="3d-asset">3D asset / CAD</option><option value="software-license">Software / digital license</option><option value="digital-media">Digital media</option>
               </select>
               {assetType === 'nft' ? <>

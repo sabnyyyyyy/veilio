@@ -44,14 +44,27 @@ interface DatasetDatabase {
 const DATA_DIR = process.env.VEILIO_ASSET_STORAGE_DIR || path.join(process.cwd(), 'data');
 const ENCRYPTED_DIR = path.join(DATA_DIR, 'encrypted');
 const DB_FILE = path.join(DATA_DIR, 'db', 'datasets.json');
+const REDIS_RECORD_PREFIX = 'veilio:asset:record:';
+const REDIS_AUCTION_PREFIX = 'veilio:asset:auction:';
+const REDIS_PENDING_PREFIX = 'veilio:asset:pending:';
+const REDIS_DATASET_LINK_PREFIX = 'veilio:asset:dataset-link:';
+const LINK_ASSET_SCRIPT = [
+  "if not redis.call('GET', KEYS[1]) then return -1 end",
+  "local linkedAuction = redis.call('GET', KEYS[3])",
+  "if linkedAuction and linkedAuction ~= ARGV[1] then return 0 end",
+  "local linkedDataset = redis.call('GET', KEYS[2])",
+  "if linkedDataset and linkedDataset ~= ARGV[2] then return 0 end",
+  "redis.call('SET', KEYS[1], ARGV[3])",
+  "redis.call('SET', KEYS[2], ARGV[2])",
+  "redis.call('SET', KEYS[3], ARGV[1])",
+  'return 1',
+].join('\n');
 
 export function assetStorageConfigurationError(): string | null {
   if (process.env.NODE_ENV !== 'production') return null;
-  const configuredPath = process.env.VEILIO_ASSET_STORAGE_DIR;
-  if (!configuredPath || !path.isAbsolute(configuredPath)) return 'A durable absolute VEILIO_ASSET_STORAGE_DIR is required in production.';
-  const publicDirectory = path.resolve(process.cwd(), 'public').toLowerCase();
-  const resolvedPath = path.resolve(configuredPath).toLowerCase();
-  if (resolvedPath === publicDirectory || resolvedPath.startsWith(`${publicDirectory}${path.sep.toLowerCase()}`)) return 'Asset storage cannot be placed inside the public directory.';
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return 'Private Vercel Blob is not configured. Connect a private Blob store to this Vercel project.';
+  if (!isAssetRedisConfigured()) return 'Persistent asset metadata storage is not configured. Connect an HTTPS Redis REST database.';
+  if (!process.env.CLAMAV_HOST) return 'Malware scanning is not configured. Set a reachable CLAMAV_HOST before accepting product files.';
   return null;
 }
 
@@ -108,18 +121,91 @@ function readDb(): DatasetDatabase {
   return legacyDatabase;
 }
 
-export function saveDatasetRecord(record: DatasetRecord) {
+function redisRecordKey(datasetId: string) { return `${REDIS_RECORD_PREFIX}${datasetId}`; }
+function redisAuctionKey(auctionId: string) { return `${REDIS_AUCTION_PREFIX}${auctionId}`; }
+function encryptStoredJson(value: unknown) {
+  return JSON.stringify(encryptDatabase(JSON.stringify(value), parseAssetMasterKey()));
+}
+function decryptStoredJson<T>(serialized: string): T {
+  const envelope = JSON.parse(serialized) as EncryptedDatabase;
+  return JSON.parse(decryptDatabase(envelope, parseAssetMasterKey())) as T;
+}
+
+export interface PendingAssetUpload {
+  datasetId: string;
+  status: 'uploading' | 'processing' | 'rejected';
+  address: string;
+  assetType: DatasetRecord['assetType'];
+  fileName: string;
+  fileSize: number;
+  nonce: string;
+  timestamp: number;
+  signature: string;
+  fileHashHex: string;
+  keyBase64: string;
+  ivBase64: string;
+  licenseType?: string;
+  accessInstructions?: string;
+  error?: string;
+}
+
+export async function createPendingAssetUpload(upload: PendingAssetUpload) {
+  if (!isAssetRedisConfigured()) throw new Error('Persistent upload state requires Redis REST.');
+  const result = await assetRedisCommand<string | null>([
+    'SET', `${REDIS_PENDING_PREFIX}${upload.datasetId}`, encryptStoredJson(upload), 'EX', '3600', 'NX',
+  ]);
+  if (result !== 'OK') throw new Error('This upload session already exists or expired.');
+}
+
+export async function getPendingAssetUpload(datasetId: string): Promise<PendingAssetUpload | null> {
+  if (!isAssetRedisConfigured()) return null;
+  const value = await assetRedisCommand<string | null>(['GET', `${REDIS_PENDING_PREFIX}${datasetId}`]);
+  return value ? decryptStoredJson<PendingAssetUpload>(value) : null;
+}
+
+export async function updatePendingAssetUpload(upload: PendingAssetUpload) {
+  await assetRedisCommand(['SET', `${REDIS_PENDING_PREFIX}${upload.datasetId}`, encryptStoredJson(upload), 'EX', '3600']);
+}
+
+export async function deletePendingAssetUpload(datasetId: string) {
+  if (isAssetRedisConfigured()) await assetRedisCommand(['DEL', `${REDIS_PENDING_PREFIX}${datasetId}`]);
+}
+
+export async function saveDatasetRecord(record: DatasetRecord) {
+  if (isAssetRedisConfigured()) {
+    const result = await assetRedisCommand<string | null>(['SET', redisRecordKey(record.datasetId), encryptStoredJson(record), 'NX']);
+    if (result !== 'OK') throw new Error('Asset record already exists.');
+    return;
+  }
   const database = readDb();
   database.records[record.datasetId] = record;
   writeDb(database);
 }
 
-export function getDatasetRecord(datasetId: string): DatasetRecord | null {
+export async function getDatasetRecord(datasetId: string): Promise<DatasetRecord | null> {
+  if (isAssetRedisConfigured()) {
+    const value = await assetRedisCommand<string | null>(['GET', redisRecordKey(datasetId)]);
+    return value ? decryptStoredJson<DatasetRecord>(value) : null;
+  }
   const database = readDb();
   return database.records[datasetId] || null;
 }
 
-export function linkAuctionToDataset(datasetId: string, auctionId: string) {
+export async function linkAuctionToDataset(datasetId: string, auctionId: string) {
+  if (isAssetRedisConfigured()) {
+    const record = await getDatasetRecord(datasetId);
+    if (!record) return;
+    if (record.auctionId && record.auctionId !== auctionId) throw new Error('Asset is already linked to another auction.');
+    record.auctionId = auctionId;
+    const result = await assetRedisCommand<number>([
+      'EVAL', LINK_ASSET_SCRIPT, '3',
+      redisRecordKey(datasetId), redisAuctionKey(auctionId), `${REDIS_DATASET_LINK_PREFIX}${datasetId}`,
+      datasetId, auctionId, encryptStoredJson(record),
+    ]);
+    if (Number(result) === -1) throw new Error('Uploaded asset record no longer exists.');
+    if (Number(result) !== 1) throw new Error('Auction or asset is already linked to a different record.');
+    return;
+  }
   const database = readDb();
   if (database.records[datasetId]) {
     database.records[datasetId].auctionId = auctionId;
@@ -127,7 +213,11 @@ export function linkAuctionToDataset(datasetId: string, auctionId: string) {
   }
 }
 
-export function getDatasetRecordByAuctionId(auctionId: string): DatasetRecord | null {
+export async function getDatasetRecordByAuctionId(auctionId: string): Promise<DatasetRecord | null> {
+  if (isAssetRedisConfigured()) {
+    const datasetId = await assetRedisCommand<string | null>(['GET', redisAuctionKey(auctionId)]);
+    return datasetId ? getDatasetRecord(datasetId) : null;
+  }
   const database = readDb();
   return Object.values(database.records).find((record) => record.auctionId === auctionId) || null;
 }

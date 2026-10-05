@@ -15,8 +15,20 @@ export function assetUploadMessage(input: {
   fileSize: number;
   timestamp: number;
   nonce: string;
+  datasetId?: string;
+  fileHashHex?: string;
 }) {
-  return [domain('upload'), `Wallet: ${input.address.toLowerCase()}`, `Asset type: ${input.assetType}`, `File: ${input.fileName}`, `Bytes: ${input.fileSize}`, `Timestamp: ${input.timestamp}`, `Nonce: ${input.nonce}`].join('\n');
+  return [
+    domain('upload'),
+    `Wallet: ${input.address.toLowerCase()}`,
+    `Asset type: ${input.assetType}`,
+    `File: ${input.fileName}`,
+    `Bytes: ${input.fileSize}`,
+    ...(input.datasetId ? [`Dataset ID: ${input.datasetId}`] : []),
+    ...(input.fileHashHex ? [`SHA-256: ${input.fileHashHex.toLowerCase()}`] : []),
+    `Timestamp: ${input.timestamp}`,
+    `Nonce: ${input.nonce}`,
+  ].join('\n');
 }
 
 export function datasetLinkMessage(input: { datasetId: string; auctionId: string; address: string; timestamp: number }) {

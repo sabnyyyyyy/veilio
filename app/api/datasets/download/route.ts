@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
+import { get as getBlob } from '@vercel/blob';
 import { verifyMessage, createPublicClient, http, isAddress } from 'viem';
 import { bnbChain } from '@/lib/chain';
 import { VEIL_V3_CONTRACT_ADDRESS, VEIL_V3_ABI } from '@/lib/contract';
@@ -72,18 +73,10 @@ export async function POST(req: NextRequest) {
     }
 
     // 4. Retrieve Dataset Record & Key
-    const record = getDatasetRecordByAuctionId(id);
+    const record = await getDatasetRecordByAuctionId(id);
     if (!record) {
       return NextResponse.json({ error: 'Dataset record not found for this auction' }, { status: 404 });
     }
-
-    // 5. Read Encrypted File Buffer
-    const encryptedFilePath = getEncryptedFilePath(record.encryptedFilePath);
-    if (!encryptedFilePath) {
-      return NextResponse.json({ error: 'Encrypted file missing from storage' }, { status: 500 });
-    }
-    const stat = await fs.stat(encryptedFilePath).catch(() => null);
-    if (!stat?.isFile()) return NextResponse.json({ error: 'Encrypted file missing from storage' }, { status: 500 });
 
     const metadata = Buffer.from(JSON.stringify({
       fileName: record.fileName,
@@ -97,23 +90,55 @@ export async function POST(req: NextRequest) {
     const prefix = Buffer.allocUnsafe(4 + metadata.length);
     prefix.writeUInt32BE(metadata.length, 0);
     metadata.copy(prefix, 4);
-    const fileStream = createReadStream(encryptedFilePath);
-    const stream = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        controller.enqueue(new Uint8Array(prefix));
-        try {
-          for await (const chunk of fileStream) controller.enqueue(new Uint8Array(chunk as Buffer));
-          controller.close();
-        } catch (error) { controller.error(error); }
-      },
-      cancel() { fileStream.destroy(); },
-    });
+
+    // 5. Read Encrypted File Buffer
+    let encryptedSize: number;
+    let stream: ReadableStream<Uint8Array>;
+    if (process.env.NODE_ENV === 'production') {
+      const storedBlob = await getBlob(record.encryptedFilePath, { access: 'private' });
+      if (!storedBlob || storedBlob.statusCode !== 200) return NextResponse.json({ error: 'Encrypted file missing from storage' }, { status: 500 });
+      encryptedSize = storedBlob.blob.size;
+      const reader = storedBlob.stream.getReader();
+      stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(new Uint8Array(prefix));
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              controller.enqueue(value);
+            }
+            controller.close();
+          } catch (error) { controller.error(error); }
+          finally { reader.releaseLock(); }
+        },
+        cancel() { void reader.cancel(); },
+      });
+    } else {
+      const encryptedFilePath = getEncryptedFilePath(record.encryptedFilePath);
+      if (!encryptedFilePath) return NextResponse.json({ error: 'Encrypted file missing from storage' }, { status: 500 });
+      const stat = await fs.stat(encryptedFilePath).catch(() => null);
+      if (!stat?.isFile()) return NextResponse.json({ error: 'Encrypted file missing from storage' }, { status: 500 });
+      encryptedSize = stat.size;
+      const fileStream = createReadStream(encryptedFilePath);
+      stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(new Uint8Array(prefix));
+          try {
+            for await (const chunk of fileStream) controller.enqueue(new Uint8Array(chunk as Buffer));
+            controller.close();
+          } catch (error) { controller.error(error); }
+        },
+        cancel() { fileStream.destroy(); },
+      });
+    }
+
     auditAssetEvent({ action: 'download', result: 'success', assetType: record.assetType || 'dataset', sizeBytes: record.size, auctionId: id, walletAddress: String(address) });
     return new Response(stream, {
       status: 200,
       headers: {
         'Content-Type': 'application/vnd.veilio.encrypted-asset',
-        'Content-Length': String(prefix.length + stat.size),
+        'Content-Length': String(prefix.length + encryptedSize),
         'Cache-Control': 'private, no-store, max-age=0',
         'X-Content-Type-Options': 'nosniff',
       },

@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid seller signature' }, { status: 401 });
     }
 
-    const record = getDatasetRecord(datasetId);
+    const record = await getDatasetRecord(datasetId);
     if (!record) return NextResponse.json({ error: 'Dataset record not found' }, { status: 404 });
     if (record.uploader && record.uploader.toLowerCase() !== String(address).toLowerCase()) {
       auditAssetEvent({ action: 'link', result: 'denied', assetType: record.assetType, auctionId: id, walletAddress: String(address), reasonCode: 'uploader_mismatch' });
@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'On-chain auction metadata does not match the uploaded asset ID, hash, and type.' }, { status: 409 });
     }
 
-    linkAuctionToDataset(datasetId, auctionId);
+    await linkAuctionToDataset(datasetId, auctionId);
     auditAssetEvent({ action: 'link', result: 'success', assetType: record.assetType || 'dataset', sizeBytes: record.size, auctionId: id, walletAddress: String(address) });
     
     return NextResponse.json({ success: true });

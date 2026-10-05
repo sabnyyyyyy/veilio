@@ -1,13 +1,13 @@
 import { expect } from 'chai';
 import crypto from 'crypto';
 import net from 'node:net';
-import path from 'node:path';
 import { verifyMessage } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { assetUploadMessage } from '../lib/assetAuth';
 import { sanitizeAssetFileName, validateAssetUpload, MAX_ASSET_UPLOAD_BYTES } from '../lib/assetPolicy';
 import { decryptFile, encryptFile } from '../lib/server/encryption';
 import { decryptDatabase, encryptDatabase, parseAssetMasterKey } from '../lib/server/datasetVault';
+import { analyzeAsset } from '../lib/server/assetManifest';
 import { allowAssetUpload } from '../lib/server/uploadRateLimit';
 import { scanAssetBuffer } from '../lib/server/malwareScan';
 import { unpackEncryptedAssetBundle } from '../lib/client/decryption';
@@ -46,6 +46,14 @@ describe('VEILIO encrypted asset security', function () {
         ['2', 'Bob', 'line one\r\nline two'],
       ]);
     expect(() => parseCsvRows('id,name\n1,"unfinished')).to.throw('Unclosed quoted CSV field');
+  });
+
+  it('creates dataset manifests and leaves non-dataset assets opaque', function () {
+    const dataset = analyzeAsset('dataset', 'metrics.csv', Buffer.from('id,value\n1,10\n2,20\n'));
+    expect(dataset.format).to.equal('CSV');
+    expect(dataset.recordCount).to.equal(2);
+    expect(dataset.columns).to.deep.equal(['id', 'value']);
+    expect(analyzeAsset('ai-model', 'model.onnx', Buffer.from([1, 2, 3]))).to.include({ format: 'UNKNOWN', recordCount: 0 });
   });
 
   it('sanitizes client filenames and rejects mismatched, empty, and oversized uploads', function () {
@@ -145,22 +153,38 @@ describe('VEILIO encrypted asset security', function () {
     }
   });
 
-  it('requires an explicit durable private asset volume in production', function () {
+  it('requires private Blob, persistent Redis, and malware scanning in production', function () {
     const previousNodeEnv = process.env.NODE_ENV;
-    const previousStorage = process.env.VEILIO_ASSET_STORAGE_DIR;
+    const previousBlobToken = process.env.BLOB_READ_WRITE_TOKEN;
+    const previousRedisUrl = process.env.ASSET_REDIS_REST_URL;
+    const previousRedisToken = process.env.ASSET_REDIS_REST_TOKEN;
+    const previousClamHost = process.env.CLAMAV_HOST;
     process.env.NODE_ENV = 'production';
     try {
-      delete process.env.VEILIO_ASSET_STORAGE_DIR;
-      expect(assetStorageConfigurationError()).to.contain('durable absolute');
-      process.env.VEILIO_ASSET_STORAGE_DIR = path.resolve(process.cwd(), 'public', 'assets');
-      expect(assetStorageConfigurationError()).to.contain('public directory');
-      process.env.VEILIO_ASSET_STORAGE_DIR = path.resolve(process.cwd(), 'private-asset-volume');
+      delete process.env.BLOB_READ_WRITE_TOKEN;
+      process.env.ASSET_REDIS_REST_URL = 'https://redis.example.test';
+      process.env.ASSET_REDIS_REST_TOKEN = 'test-token';
+      process.env.CLAMAV_HOST = 'clamav.example.test';
+      expect(assetStorageConfigurationError()).to.contain('Private Vercel Blob');
+      process.env.BLOB_READ_WRITE_TOKEN = 'blob-token';
+      delete process.env.ASSET_REDIS_REST_URL;
+      expect(assetStorageConfigurationError()).to.contain('Redis REST');
+      process.env.ASSET_REDIS_REST_URL = 'https://redis.example.test';
+      delete process.env.CLAMAV_HOST;
+      expect(assetStorageConfigurationError()).to.contain('Malware scanning');
+      process.env.CLAMAV_HOST = 'clamav.example.test';
       expect(assetStorageConfigurationError()).to.equal(null);
     } finally {
       if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = previousNodeEnv;
-      if (previousStorage === undefined) delete process.env.VEILIO_ASSET_STORAGE_DIR;
-      else process.env.VEILIO_ASSET_STORAGE_DIR = previousStorage;
+      if (previousBlobToken === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
+      else process.env.BLOB_READ_WRITE_TOKEN = previousBlobToken;
+      if (previousRedisUrl === undefined) delete process.env.ASSET_REDIS_REST_URL;
+      else process.env.ASSET_REDIS_REST_URL = previousRedisUrl;
+      if (previousRedisToken === undefined) delete process.env.ASSET_REDIS_REST_TOKEN;
+      else process.env.ASSET_REDIS_REST_TOKEN = previousRedisToken;
+      if (previousClamHost === undefined) delete process.env.CLAMAV_HOST;
+      else process.env.CLAMAV_HOST = previousClamHost;
     }
   });
 

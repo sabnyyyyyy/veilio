@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 4. Retrieve Dataset Record
-    const record = getDatasetRecordByAuctionId(id);
+    const record = await getDatasetRecordByAuctionId(id);
     if (!record) {
       return NextResponse.json({ error: 'Dataset record not found for this auction' }, { status: 404 });
     }
