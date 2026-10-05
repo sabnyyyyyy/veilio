@@ -45,3 +45,7 @@ data/
 *.njsproj
 *.sln
 *.sw?
+.next/
+.local-product-e2e/.next-product-e2e/
+artifacts/
+cache/
