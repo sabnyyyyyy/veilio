@@ -104,7 +104,7 @@ function normalizeSamplePreview(value: unknown): AssetMetadata['samplePreview'] 
 }
 
 /** Parse a contract/wallet error into a readable user-facing message. */
-function parseError(err: unknown): string {
+function parseError(err: unknown, action = 'transaction'): string {
   if (!(err instanceof Error)) return 'Transaction failed.';
   const m = err.message;
   if (m.includes('Seller cannot bid') || m.includes('own auction'))
@@ -126,7 +126,7 @@ function parseError(err: unknown): string {
   if (m.includes('insufficient') || m.includes('Insufficient'))
     return 'Insufficient BNB balance for gas.';
   if (m.toLowerCase().includes('requested resource not available') || m.toLowerCase().includes('resource unavailable'))
-    return 'The BNB Testnet RPC could not prepare this reveal. Your bid secret is saved in this browser; retry shortly and keep using the same wallet.';
+    return `The wallet or BNB Testnet RPC could not prepare the ${action} transaction. It may not have been submitted. Check that your wallet is on BNB Smart Chain Testnet, then retry shortly.`;
   if (m.includes('reverted on-chain'))
     return 'Transaction was reverted by the contract.';
   return m.length > 200 ? m.substring(0, 200) + '…' : m;
@@ -451,7 +451,7 @@ export default function AuctionDetailPage() {
       setCommitStatus('success');
     } catch (err: unknown) {
       console.error('[CommitBid] Error:', err);
-      setCommitError(parseError(err));
+      setCommitError(parseError(err, 'bid commitment'));
       setCommitStatus('error');
     }
   }
@@ -500,7 +500,7 @@ export default function AuctionDetailPage() {
       setRevealStatus('success');
     } catch (err: unknown) {
       console.error('[RevealBid] Error:', err);
-      setRevealError(parseError(err));
+      setRevealError(parseError(err, 'bid reveal'));
       setRevealStatus('error');
     }
   }
@@ -544,7 +544,7 @@ export default function AuctionDetailPage() {
       await loadPendingRefund();
     } catch (err: unknown) {
       console.error('[SettleAuction] Error:', err);
-      setSettleError(parseError(err));
+      setSettleError(parseError(err, 'auction settlement'));
       setSettleStatus('error');
     }
   }
@@ -583,7 +583,7 @@ export default function AuctionDetailPage() {
       await loadPendingRefund();
     } catch (err: unknown) {
       console.error('[WithdrawRefund] Error:', err);
-      setWithdrawError(parseError(err));
+      setWithdrawError(parseError(err, 'refund withdrawal'));
       setWithdrawStatus('error');
     }
   }
