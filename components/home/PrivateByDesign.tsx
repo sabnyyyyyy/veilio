@@ -3,7 +3,7 @@ import React from 'react';
 const steps = [
   { number: '01', title: 'DISCOVER', detail: 'Browse public asset listings.' },
   { number: '02', title: 'EVALUATE', detail: 'Assess an asset against your goals.' },
-  { number: '03', title: 'COMMIT', detail: 'Submit a sealed bid from a connected wallet.' },
+  { number: '03', title: 'COMMIT', detail: 'Submit a bid commitment and a visible BNB deposit.' },
   { number: '04', title: 'REVEAL', detail: 'Reveal the bid during the reveal phase.' },
 ];
 
@@ -55,7 +55,7 @@ export default function PrivateByDesign() {
               Connect an agent wallet to VEILIO. It can explore public listings, evaluate assets, and take part in the same sealed-bid auction flow as other participants.
             </p>
             <p className="text-base leading-7 text-[#A8A397]">
-              Bid amounts stay hidden during the commit phase and are disclosed only when participants reveal their bids.
+              A commitment hash hides the bid data until reveal. Bidder addresses and deposits remain public on-chain; the current web form deposits the entered maximum bid, so that value can be inferred.
             </p>
           </div>
           <p className="max-w-xl border-l border-[#C9A45C]/50 pl-4 text-xs leading-5 text-[#8E8A80]">
@@ -69,21 +69,21 @@ export default function PrivateByDesign() {
             <div className="mt-5 space-y-4">
               <div>
                 <div className="mb-2 flex items-center justify-between text-[10px] font-bold tracking-[0.14em] text-[#A8A397]">
-                  <span>READ AUCTIONS | REST</span><span className="font-mono text-[#77736B]">BNB TESTNET | 97</span>
+                  <span>READ AUCTIONS | REST</span><span className="font-mono text-[#77736B]">BNB TESTNET | CHAIN 97</span>
                 </div>
-                <pre className="overflow-x-auto rounded-lg border border-white/[0.08] bg-[#090908] p-3 font-mono text-[11px] leading-5 text-[#E2D4B1]"><code>GET /api/agent/v1/auctions?limit=20{'\n'}GET /api/agent/v1/auctions/&#123;id&#125;</code></pre>
+                <pre className="overflow-x-auto rounded-lg border border-white/[0.08] bg-[#090908] p-3 font-mono text-[11px] leading-5 text-[#E2D4B1]"><code>GET https://veilio.fun/api/agent/v1/auctions?limit=20{'\n'}GET https://veilio.fun/api/agent/v1/auctions/&#123;id&#125;</code></pre>
               </div>
               <div>
-                <div className="mb-2 text-[10px] font-bold tracking-[0.14em] text-[#A8A397]">PREPARE | COMMIT | REVEAL | TYPESCRIPT SDK</div>
+                <div className="mb-2 text-[10px] font-bold tracking-[0.14em] text-[#A8A397]">ILLUSTRATIVE TYPESCRIPT SDK FLOW · EXPERIMENTAL</div>
                 <pre className="overflow-x-auto rounded-lg border border-white/[0.08] bg-[#090908] p-3 font-mono text-[11px] leading-5 text-[#E2D4B1]"><code>{`const agent = createVeilioAgent({ publicClient, walletClient, account });
 const { auctions } = await agent.listAuctions({ limit: 20 });
-const bid = agent.prepareBid(auctionId, "0.05");
-await secureStore.write(bid); // save securely before commit
-await agent.commitBid(bid, "0.05");
+const bid = agent.prepareBid(auctionId, "0.05"); // maximum bid in BNB
+await secureStore.write(bid.auctionId, bid); // integrator-provided encrypted storage
+await agent.commitBid(bid, "0.08"); // public deposit; must cover max bid
 // During reveal phase:
-await agent.revealBid(await secureStore.read(auctionId));`}</code></pre>
+await agent.revealBid(await secureStore.read(bid.auctionId));`}</code></pre>
               </div>
-              <p className="text-[11px] leading-5 text-[#8E8A80]">Provide viem public and wallet clients. The wallet signs transactions; keep the prepared bid secret encrypted and durable. <a href="/api/agent/v1/auctions?limit=10" className="text-[#D6B56D] underline decoration-[#D6B56D]/40 underline-offset-2 hover:text-[#F5F2E8]">Open the auction endpoint</a> to inspect listing data.</p>
+              <p className="text-[11px] leading-5 text-[#8E8A80]">This is illustrative code: the SDK is available in the repository but is not published as an npm package, and <code>secureStore</code> is an adapter you must implement. Use viem clients configured for BNB Testnet (chain ID 97). Keep the prepared bid secret encrypted and durable; if it is lost, the bid cannot be revealed. The commitment is private until reveal, but the deposit and bidder address are public. <a href="/api/agent/v1/auctions?limit=10" className="text-[#D6B56D] underline decoration-[#D6B56D]/40 underline-offset-2 hover:text-[#F5F2E8]">Open the live auction endpoint</a>.</p>
             </div>
           </details>
           <a href="/auctions" className="inline-flex items-center gap-3 pt-1 text-xs font-bold tracking-[0.16em] text-[#D6B56D] transition-colors hover:text-[#F5F2E8]">
