@@ -17,8 +17,7 @@ export default function BlockchainProof() {
               DON'T BID AGAINST THE SCREEN.
             </h3>
             <p className="text-lg text-[#A8A397] leading-relaxed max-w-2xl">
-              Traditional visible auctions encourage people to react to every new bid. 
-              VEILIO lets participants commit to their maximum independently, removing manipulation and snipers.
+              Commit–reveal prevents bidders from reacting to revealed bid values during the commit phase. Wallet addresses and escrow deposits remain public, and bids become public during reveal.
             </p>
           </div>
         </div>
@@ -48,7 +47,7 @@ export default function BlockchainProof() {
                 TRANSPARENT
               </h4>
               <p className="text-sm text-[#A8A397] leading-relaxed">
-                Settlement follows smart-contract rules automatically without intermediaries or bias.
+                The contract applies winner, fee, and refund rules. Sellers and bidders withdraw their credited balances from the contract.
               </p>
             </div>
 
@@ -57,7 +56,7 @@ export default function BlockchainProof() {
                 VERIFIABLE
               </h4>
               <p className="text-sm text-[#A8A397] leading-relaxed">
-                Anyone can independently verify the final result and cryptographic proof at any time.
+                Auction state, commitments, revealed bids, and completed settlement fields can be inspected on BNB Chain.
               </p>
             </div>
           </div>

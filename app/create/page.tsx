@@ -640,6 +640,9 @@ try {
                   </div>
                 </div>
               </div>
+              <p className="border border-[#C9A45C]/20 bg-[#C9A45C]/5 px-4 py-3 text-xs leading-5 text-[#A8A397]">
+                Successful sales pay a 10% VEILIO fee from the winning bid. The remaining 90% is credited to the seller for withdrawal. The active contract uses first-price settlement: the winner pays their revealed bid.
+              </p>
             </div>
 
             {/* REVIEW SECTION */}

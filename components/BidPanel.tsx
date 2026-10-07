@@ -290,16 +290,16 @@ export default function BidPanel({
     <div className="p-8 rounded-2xl bg-[#151512] border border-white/10 space-y-6">
       <div>
         <h3 className="text-[#A8A397] text-xs uppercase font-bold tracking-widest">
-          YOUR MAXIMUM BID
+          YOUR BID COMMITMENT
         </h3>
         <p className="text-sm text-[#A8A397] mt-1">
-          Your maximum bid stays hidden from other bidders until reveal.
+          The commitment hash is opaque until reveal; your wallet address and escrow deposit remain public.
         </p>
       </div>
 
       {!isConnected ? (
         <div className="pt-2 space-y-4">
-          <p className="text-sm text-[#F5F2E8]">Connect your Web3 wallet to place a private bid.</p>
+          <p className="text-sm text-[#F5F2E8]">Connect your Web3 wallet to submit a bid commitment.</p>
           <WalletButton />
         </div>
       ) : submittedTxHash || existingSecret ? (

@@ -12,12 +12,12 @@ export default function HowItWorks() {
     {
       number: '02',
       title: 'LOCK YOUR BID',
-      description: 'Your maximum is cryptographically committed on BNB Chain Testnet and hidden from everyone.',
+      description: 'A commitment hash is recorded on BNB Chain. Your wallet and deposit remain public; a higher deposit can keep your exact maximum from being inferred.',
     },
     {
       number: '03',
       title: 'REVEAL & SETTLE',
-      description: 'After the auction closes, the protocol transparently calculates the winner and true market price.',
+      description: 'After reveal, the highest valid bid wins and pays that bid. The contract records the outcome and seller fee split.',
     },
   ];
 

@@ -166,10 +166,12 @@ export default function AuctionDetailPage() {
 
   // ── Commit state ─────────────────────────────────────────────────────
   const [maxBidInput, setMaxBidInput] = useState('');
+  const [depositInput, setDepositInput] = useState('');
   const [commitStatus, setCommitStatus] = useState<'idle' | 'confirming' | 'success' | 'error'>('idle');
   const [commitTxHash, setCommitTxHash] = useState<`0x${string}` | null>(null);
   const [commitError, setCommitError] = useState<string | null>(null);
   const [committedMaxBid, setCommittedMaxBid] = useState<string>('');
+  const [committedDeposit, setCommittedDeposit] = useState<string>('');
 
   // ── Reveal state ─────────────────────────────────────────────────────
   const [revealStatus, setRevealStatus] = useState<'idle' | 'confirming' | 'success' | 'error'>('idle');
@@ -411,9 +413,9 @@ export default function AuctionDetailPage() {
     if (!auction) { setCommitError('Auction data not loaded yet.'); return; }
 
     const maxBidTrimmed = maxBidInput.trim();
-    const maxBidNum = parseFloat(maxBidTrimmed);
-    if (!maxBidTrimmed || isNaN(maxBidNum) || maxBidNum <= 0) {
-      setCommitError('Please enter a valid bid amount greater than 0.');
+    const depositTrimmed = depositInput.trim();
+    if (!maxBidTrimmed || !depositTrimmed) {
+      setCommitError('Enter both your maximum bid and the public deposit amount.');
       return;
     }
 
@@ -421,11 +423,15 @@ export default function AuctionDetailPage() {
       setCommitStatus('confirming');
       const secret = generateRandomSecret();
       const maxBidWei = parseEther(maxBidTrimmed);
+      const depositWei = parseEther(depositTrimmed);
+      if (maxBidWei <= 0n) throw new Error('Maximum bid must be greater than zero.');
+      if (maxBidWei < auction.startingPrice) throw new Error(`Maximum bid must be at least ${formatEther(auction.startingPrice)} BNB.`);
+      if (depositWei < maxBidWei) throw new Error('Public deposit must be equal to or greater than your maximum bid.');
       const commitment = computeCommitmentHash(auction.id, address, maxBidTrimmed, secret);
 
       console.log('[CommitBid] auctionId:', auction.id.toString());
       console.log('[CommitBid] bidder:', address);
-      console.log('[CommitBid] maxBid:', maxBidTrimmed, 'BNB');
+      console.log('[CommitBid] maxBid:', maxBidTrimmed, 'BNB; public deposit:', depositTrimmed, 'BNB');
       console.log('[CommitBid] commitment:', commitment);
 
       // commitBid(uint256 auctionId, bytes32 commitment) payable
@@ -434,7 +440,7 @@ export default function AuctionDetailPage() {
         abi: VEIL_V3_ABI,
         functionName: 'commitBid',
         args: [auction.id, commitment],
-        value: maxBidWei,
+        value: depositWei,
       });
 
       console.log('[CommitBid] Tx submitted:', hash);
@@ -448,6 +454,7 @@ export default function AuctionDetailPage() {
       saveBidSecret({ auctionId, bidder: address, maxBid: maxBidTrimmed, secret, commitment, timestamp: Date.now() });
       setCommitTxHash(hash);
       setCommittedMaxBid(maxBidTrimmed);
+      setCommittedDeposit(depositTrimmed);
       setCommitStatus('success');
     } catch (err: unknown) {
       console.error('[CommitBid] Error:', err);
@@ -946,8 +953,12 @@ export default function AuctionDetailPage() {
                       </div>
                       <div className="p-4 rounded-xl bg-[#0A0A09] border border-white/10 space-y-2 text-xs">
                         <div className="flex justify-between">
-                          <span className="text-[#A8A397]">Your maximum</span>
+                          <span className="text-[#A8A397]">Maximum bid saved for reveal</span>
                           <span className="font-bold text-[#F5F2E8]">{committedMaxBid} BNB</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-[#A8A397]">Public deposit</span>
+                          <span className="font-bold text-[#F5F2E8]">{committedDeposit} BNB</span>
                         </div>
                         <div className="flex justify-between gap-4">
                           <span className="text-[#A8A397] flex-shrink-0">Tx hash</span>
@@ -963,16 +974,27 @@ export default function AuctionDetailPage() {
                   ) : (
                     <>
                       <p className="mt-2 text-sm leading-6 text-[#A8A397]">
-                        Your maximum bid stays hidden from other bidders until the reveal phase.
+                        The commitment hash hides your bid until reveal. Your wallet address and deposit are public on-chain. A deposit equal to your maximum reveals that maximum; a higher deposit only gives others an upper bound. Any excess becomes claimable after you reveal.
                       </p>
+                      <label htmlFor="max-bid-input" className="mt-6 block text-xs font-semibold uppercase tracking-wider text-[#A8A397]">Maximum bid (BNB)</label>
                       <input
                         id="max-bid-input"
-                        type="number" min="0.00001" step="0.00001"
-                        placeholder="Enter maximum bid (BNB)"
+                        type="number" min="0.000000000000000001" step="0.000000000000000001"
+                        placeholder="Your maximum amount"
                         value={maxBidInput}
                         onChange={(e) => { setMaxBidInput(e.target.value); setCommitError(null); if (commitStatus === 'error') setCommitStatus('idle'); }}
                         disabled={commitStatus === 'confirming'}
-                        className="mt-6 w-full rounded-xl border border-white/10 bg-[#0A0A09] px-5 py-4 text-[#F5F2E8] outline-none focus:border-[#C9A45C]/60 disabled:opacity-50"
+                        className="mt-2 w-full rounded-xl border border-white/10 bg-[#0A0A09] px-5 py-4 text-[#F5F2E8] outline-none focus:border-[#C9A45C]/60 disabled:opacity-50"
+                      />
+                      <label htmlFor="public-deposit-input" className="mt-4 block text-xs font-semibold uppercase tracking-wider text-[#A8A397]">Public deposit (BNB)</label>
+                      <input
+                        id="public-deposit-input"
+                        type="number" min="0.000000000000000001" step="0.000000000000000001"
+                        placeholder="Must be at least your maximum bid"
+                        value={depositInput}
+                        onChange={(e) => { setDepositInput(e.target.value); setCommitError(null); if (commitStatus === 'error') setCommitStatus('idle'); }}
+                        disabled={commitStatus === 'confirming'}
+                        className="mt-2 w-full rounded-xl border border-white/10 bg-[#0A0A09] px-5 py-4 text-[#F5F2E8] outline-none focus:border-[#C9A45C]/60 disabled:opacity-50"
                       />
                       {commitError && (
                         <div className="mt-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400">{commitError}</div>
@@ -983,11 +1005,11 @@ export default function AuctionDetailPage() {
                         disabled={commitStatus === 'confirming'}
                         className="mt-4 w-full rounded-xl bg-[#C9A45C] px-5 py-4 font-bold text-[#0A0A09] hover:bg-[#E6CC91] active:scale-[0.98] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {commitStatus === 'confirming' ? 'CONFIRMING…' : 'COMMIT MAXIMUM BID'}
+                        {commitStatus === 'confirming' ? 'CONFIRMING…' : 'COMMIT SEALED BID'}
                       </button>
                       {!isConnected && <p className="mt-3 text-center text-xs text-[#A8A397]">Connect your wallet to place a bid.</p>}
                       {isConnected && commitStatus === 'idle' && (
-                        <p className="mt-3 text-center text-xs text-[#A8A397]">Your bid amount will be locked as a deposit on BNB Chain.</p>
+                        <p className="mt-3 text-center text-xs text-[#A8A397]">Your deposit is locked on BNB Chain; excess over your revealed bid becomes claimable after reveal.</p>
                       )}
                     </>
                   )}

@@ -14,13 +14,13 @@ export default function HowVeilWorks() {
     },
     {
       num: '03',
-      title: 'BID PRIVATELY',
-      desc: 'Agents commit their maximum valuation without exposing it during the auction.',
+      title: 'COMMIT A BID',
+      desc: 'Agents commit a bid hash. The bidder address and deposit are public; a larger deposit can obscure the exact maximum until reveal.',
     },
     {
       num: '04',
       title: 'SETTLE',
-      desc: 'The smart contract determines the outcome and handles settlement and refunds.',
+      desc: 'The highest valid revealed bid wins under the current first-price contract; the contract credits proceeds and refunds.',
     },
   ];
 
