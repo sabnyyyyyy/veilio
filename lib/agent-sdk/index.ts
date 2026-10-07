@@ -3,6 +3,7 @@ import {
   keccak256,
   parseAbi,
   parseEther,
+  formatEther,
   type Address,
   type Hex,
   type PublicClient,
@@ -18,6 +19,7 @@ const abi = parseAbi([
   'function commitments(uint256 auctionId, address bidder) view returns (bytes32 commitment, uint256 deposit, bool revealed, uint256 maxBid)',
   'function commitBid(uint256 auctionId, bytes32 commitment) payable',
   'function revealBid(uint256 auctionId, uint256 maxBid, bytes32 secret)',
+  'function acceptDataset(uint256 auctionId)',
 ]);
 
 export const VEILIO_CHAIN_ID = bnbChain.id;
@@ -53,11 +55,40 @@ export interface PreparedBid {
   contractAddress: Address;
 }
 
+export interface AssetSearchFilter {
+  query?: string;
+  category?: string;
+  license?: string;
+  limit?: number;
+}
+
+export interface AgentAssetSummary {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  license: { type: string; usage_rights: string };
+  format?: string;
+  file_size?: string;
+  region?: string;
+  language?: string;
+  agent_compatible: boolean;
+  auction: {
+    auction_id: string;
+    state: string;
+    starting_price_bnb: string;
+    bidder_count: number;
+    commit_end_time: number;
+    reveal_end_time: number;
+  };
+}
+
 export interface VeilioAgentOptions {
   publicClient: PublicClient;
   walletClient?: WalletClient;
   account?: Address;
   contractAddress?: Address;
+  apiBaseUrl?: string;
 }
 
 function getAccount(options: VeilioAgentOptions): Address {
@@ -74,8 +105,9 @@ function stateName(value: number): AuctionState {
 
 export function createVeilioAgent(options: VeilioAgentOptions) {
   const address = options.contractAddress ?? VEILIO_CONTRACT_ADDRESS;
+  const apiBase = (options.apiBaseUrl || '').replace(/\/$/, '');
 
-  async function getAuction(auctionId: bigint | number | string) {
+  async function getAuction(auctionId: bigint | number | string): Promise<VeilioAuction> {
     const id = BigInt(auctionId);
     if (id <= 0n) throw new Error('auctionId must be a positive integer.');
     const [raw, currentState] = await Promise.all([
@@ -101,6 +133,88 @@ export function createVeilioAgent(options: VeilioAgentOptions) {
     const auctions = await Promise.all(ids.map((id) => getAuction(id)));
     const next = ids.length === limit && ids.at(-1)! > 1n ? (ids.at(-1)! - 1n).toString() : null;
     return { auctions, nextCursor: next };
+  }
+
+  async function searchAssets(filter: AssetSearchFilter = {}): Promise<AgentAssetSummary[]> {
+    try {
+      const params = new URLSearchParams();
+      if (filter.query) params.set('query', filter.query);
+      if (filter.category) params.set('category', filter.category);
+      if (filter.license) params.set('license', filter.license);
+      if (filter.limit) params.set('limit', String(filter.limit));
+
+      const endpoint = `${apiBase}/api/agent/v1/assets?${params.toString()}`;
+      const res = await fetch(endpoint);
+      if (res.ok) {
+        const json = await res.json();
+        return json.data || [];
+      }
+    } catch {
+      // Fallback to on-chain iteration
+    }
+
+    const { auctions } = await listAuctions({ limit: filter.limit ?? 10 });
+    return auctions.map((a) => ({
+      id: a.id.toString(),
+      title: a.itemName,
+      description: a.description,
+      category: 'dataset',
+      license: { type: 'commercial_use', usage_rights: 'Standard digital asset terms' },
+      agent_compatible: true,
+      auction: {
+        auction_id: a.id.toString(),
+        state: a.state,
+        starting_price_bnb: formatEther(a.startingPriceWei),
+        bidder_count: Number(a.bidderCount),
+        commit_end_time: Number(a.commitEndTime),
+        reveal_end_time: Number(a.revealEndTime),
+      },
+    }));
+  }
+
+  async function getAssetDetails(assetId: string | number | bigint) {
+    try {
+      const endpoint = `${apiBase}/api/agent/v1/assets/${assetId}`;
+      const res = await fetch(endpoint);
+      if (res.ok) {
+        const json = await res.json();
+        return json.data;
+      }
+    } catch {
+      // Fallback to auction lookup
+    }
+    const auction = await getAuction(assetId);
+    return {
+      id: auction.id.toString(),
+      title: auction.itemName,
+      description: auction.description,
+      category: 'dataset',
+      auction: {
+        auction_id: auction.id.toString(),
+        state: auction.state,
+        starting_price_bnb: formatEther(auction.startingPriceWei),
+      },
+    };
+  }
+
+  async function evaluateAsset(assetId: string | number | bigint, criteria?: { maxBudgetBnb?: number; preferredLicense?: string }) {
+    const details = await getAssetDetails(assetId);
+    const startingPrice = parseFloat(details?.auction?.starting_price_bnb || '0');
+    const fitsBudget = criteria?.maxBudgetBnb ? startingPrice <= criteria.maxBudgetBnb : true;
+    const licenseType = details?.license?.type || 'commercial_use';
+    const fitsLicense = criteria?.preferredLicense ? licenseType === criteria.preferredLicense : true;
+
+    return {
+      assetId: String(assetId),
+      recommended: fitsBudget && fitsLicense,
+      evaluation: {
+        fitsBudget,
+        fitsLicense,
+        startingPriceBnb: startingPrice,
+        licenseType,
+        category: details?.category || 'digital-asset',
+      },
+    };
   }
 
   function prepareBid(auctionId: bigint | number | string, maxBid: string): PreparedBid {
@@ -151,5 +265,55 @@ export function createVeilioAgent(options: VeilioAgentOptions) {
     return walletClient.writeContract({ address, abi, functionName: 'revealBid', args: [BigInt(prepared.auctionId), BigInt(prepared.maxBidWei), prepared.secret], account: walletClient.account ?? getAccount(options), chain: walletClient.chain ?? undefined });
   }
 
-  return { address, chainId: VEILIO_CHAIN_ID, getAuction, listAuctions, prepareBid, commitBid, revealBid };
+  async function getAuctionResult(auctionId: bigint | number | string) {
+    const auction = await getAuction(auctionId);
+    const agentAddress = getAccount(options).toLowerCase();
+    const isWinner = auction.highestBidder.toLowerCase() === agentAddress;
+    return {
+      auctionId: String(auctionId),
+      state: auction.state,
+      isWinner,
+      highestBidder: auction.highestBidder,
+      winningBidBnb: formatEther(auction.highestBidWei),
+    };
+  }
+
+  async function claimAsset(auctionId: bigint | number | string) {
+    const walletClient = options.walletClient;
+    if (!walletClient) throw new Error('A walletClient is required to submit transactions.');
+    return walletClient.writeContract({
+      address,
+      abi,
+      functionName: 'acceptDataset',
+      args: [BigInt(auctionId)],
+      account: walletClient.account ?? getAccount(options),
+      chain: walletClient.chain ?? undefined,
+    });
+  }
+
+  async function getLicense(auctionId: bigint | number | string) {
+    const details = await getAssetDetails(auctionId);
+    return {
+      auctionId: String(auctionId),
+      assetTitle: details?.title,
+      license: details?.license,
+      verificationUrl: `/verify/${auctionId}`,
+    };
+  }
+
+  return {
+    address,
+    chainId: VEILIO_CHAIN_ID,
+    getAuction,
+    listAuctions,
+    searchAssets,
+    getAssetDetails,
+    evaluateAsset,
+    prepareBid,
+    commitBid,
+    revealBid,
+    getAuctionResult,
+    claimAsset,
+    getLicense,
+  };
 }

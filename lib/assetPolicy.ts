@@ -3,8 +3,11 @@ export const MAX_ASSET_UPLOAD_BYTES = 100 * 1024 * 1024;
 const allowedExtensions: Record<string, Set<string>> = {
   dataset: new Set(['.csv', '.json', '.parquet']),
   'ai-model': new Set(['.onnx', '.pt', '.pth', '.safetensors', '.gguf', '.tflite', '.model', '.bin', '.pb', '.h5', '.keras', '.ckpt', '.mlmodel', '.zip']),
+  'data-license': new Set(['.csv', '.json', '.parquet', '.pdf', '.txt', '.md', '.zip']),
+  'api-license': new Set(['.json', '.yaml', '.yml', '.txt', '.pdf', '.zip']),
+  'software-license': new Set(['.pdf', '.txt', '.md', '.zip', '.tar', '.gz']),
+  'digital-asset': new Set(['.zip', '.tar', '.gz', '.json', '.bin', '.pdf', '.txt']),
   '3d-asset': new Set(['.stl', '.obj', '.fbx', '.step', '.stp', '.3mf', '.gltf', '.glb', '.iges', '.igs', '.blend', '.usd', '.usdz', '.dae', '.ply', '.3ds', '.gcode', '.zip']),
-  'software-license': new Set(['.pdf', '.txt', '.md', '.zip']),
   'digital-media': new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.tif', '.tiff', '.mp4', '.mov', '.avi', '.mkv', '.webm', '.mp3', '.wav', '.flac', '.aiff', '.ogg', '.aac', '.pdf', '.zip']),
 };
 

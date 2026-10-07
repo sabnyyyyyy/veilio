@@ -32,8 +32,22 @@ const publicClient = usePublicClient();
 
   const [itemName, setItemName] = useState('');
   const [description, setDescription] = useState('');
-  const [assetType, setAssetType] = useState<'dataset' | 'ai-model' | 'nft' | '3d-asset' | 'software-license' | 'digital-media'>('dataset');
+  const [assetType, setAssetType] = useState<
+    'dataset' | 'ai-model' | 'data-license' | 'api-license' | 'software-license' | 'nft' | 'digital-asset' | '3d-asset' | 'digital-media'
+  >('dataset');
   const [assetDetails, setAssetDetails] = useState({ tokenStandard: 'ERC-721', tokenAddress: '', tokenId: '', tokenAmount: '1', licenseType: '', accessInstructions: '' });
+  
+  // Professional Metadata State
+  const [licenseType, setLicenseType] = useState<'commercial_use' | 'academic_or_research' | 'exclusive_transfer'>('commercial_use');
+  const [usageRights, setUsageRights] = useState('Commercial deployment & analysis permitted with attribution');
+  const [formatSpec, setFormatSpec] = useState('');
+  const [region, setRegion] = useState('Global');
+  const [language, setLanguage] = useState('English');
+  const [dataPeriod, setDataPeriod] = useState('2024 - 2026');
+  const [updateFrequency, setUpdateFrequency] = useState<'one_time' | 'monthly' | 'streaming'>('one_time');
+  const [schemaOrSpec, setSchemaOrSpec] = useState('');
+  const [agentCompatible, setAgentCompatible] = useState(true);
+
   const [ipfsImageRes, setIpfsImageRes] = useState<IpfsUploadResponse | null>(null);
   const [mounted, setMounted] = useState(false);
   const [publishSamplePreview, setPublishSamplePreview] = useState(false);
@@ -232,7 +246,18 @@ const publicClient = usePublicClient();
         startingPrice,
         asset: {
           assetType,
-          deliveryMethod: assetType === 'nft' ? 'nft-transfer' : assetType === 'software-license' ? 'license-access' : 'encrypted-download',
+          category: assetType,
+          licenseType,
+          usageRights,
+          format: formatSpec || (datasetInfo?.manifest?.format) || (datasetInfo ? datasetInfo.fileName.split('.').pop()?.toUpperCase() : undefined),
+          fileSize: datasetInfo ? `${(datasetInfo.size / (1024 * 1024)).toFixed(2)} MB` : undefined,
+          region,
+          language,
+          dataPeriod,
+          updateFrequency,
+          schemaOrSpecification: schemaOrSpec || undefined,
+          agentCompatible,
+          deliveryMethod: assetType === 'nft' ? 'nft-transfer' : assetType === 'software-license' ? 'license-access' : assetType === 'api-license' ? 'license-access' : 'encrypted-download',
           ...(assetType === 'dataset' && publishSamplePreview && datasetInfo?.manifest?.columns?.length && datasetInfo.manifest.sample?.length ? {
             samplePreview: {
               columns: datasetInfo.manifest.columns,
@@ -240,7 +265,7 @@ const publicClient = usePublicClient();
             },
           } : {}),
           ...(assetType === 'nft' ? { tokenStandard: assetDetails.tokenStandard, tokenAddress: assetDetails.tokenAddress, tokenId: assetDetails.tokenId, tokenAmount: assetDetails.tokenAmount } : {}),
-          ...(assetType === 'software-license' ? { licenseType: assetDetails.licenseType } : {}),
+          ...(assetType === 'software-license' ? { licenseType: assetDetails.licenseType || licenseType } : {}),
         }
       });
 
@@ -450,7 +475,13 @@ try {
             <div className="space-y-3">
               <label className="block text-[11px] uppercase tracking-widest text-[#A8A397]">Digital asset type</label>
               <select value={assetType} onChange={(e) => { setAssetType(e.target.value as typeof assetType); setDatasetFile(null); setDatasetInfo(null); setPublishSamplePreview(false); setErrorMsg(null); }} className="w-full px-4 py-3 bg-[#0A0A09] border border-white/10 text-[#F5F2E8]">
-                <option value="dataset">Dataset (CSV, JSON, Parquet)</option><option value="ai-model">AI model</option><option value="nft">NFT (ERC-721 / ERC-1155)</option><option value="3d-asset">3D asset / CAD</option><option value="software-license">Software / digital license</option><option value="digital-media">Digital media</option>
+                <option value="dataset">Datasets (AI Training, Tabular, CSV, Parquet)</option>
+                <option value="ai-model">AI Models & Weights (Safetensors, GGUF, LoRA)</option>
+                <option value="data-license">Data Licenses (Commercial / Research Rights)</option>
+                <option value="api-license">API Access Pass / Credential Quota</option>
+                <option value="software-license">Software License / Enterprise Core</option>
+                <option value="nft">NFT Escrow (ERC-721 / ERC-1155)</option>
+                <option value="digital-asset">General Digital Asset</option>
               </select>
               {assetType === 'nft' ? <>
               <div className="grid sm:grid-cols-4 gap-3"><select value={assetDetails.tokenStandard} onChange={e => setAssetDetails({...assetDetails,tokenStandard:e.target.value,tokenAmount:e.target.value === 'ERC-721' ? '1' : assetDetails.tokenAmount})} className="px-3 py-3 bg-[#0A0A09] border border-white/10 text-[#F5F2E8]"><option>ERC-721</option><option>ERC-1155</option></select><input required placeholder="NFT contract address" value={assetDetails.tokenAddress} onChange={e=>setAssetDetails({...assetDetails,tokenAddress:e.target.value})} className="px-3 py-3 bg-[#0A0A09] border border-white/10 text-[#F5F2E8]"/><input required placeholder="Token ID" value={assetDetails.tokenId} onChange={e=>setAssetDetails({...assetDetails,tokenId:e.target.value})} className="px-3 py-3 bg-[#0A0A09] border border-white/10 text-[#F5F2E8]"/><input required type="number" min="1" step="1" disabled={assetDetails.tokenStandard === 'ERC-721'} placeholder="Amount" value={assetDetails.tokenAmount} onChange={e=>setAssetDetails({...assetDetails,tokenAmount:e.target.value})} className="px-3 py-3 bg-[#0A0A09] border border-white/10 text-[#F5F2E8] disabled:opacity-50"/></div>
@@ -573,6 +604,119 @@ try {
                   placeholder="Describe the asset, usage rights, and delivery terms..."
                   className="w-full px-4 py-3 bg-[#0A0A09] border border-white/10 rounded-none text-[#F5F2E8] focus:outline-none focus:border-[#C9A45C] transition-colors text-sm"
                 />
+              </div>
+
+              {/* PROFESSIONAL METADATA & RIGHTS */}
+              <div className="pt-6 border-t border-white/10 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-[#E6CC91]">Professional Metadata & Rights</h3>
+                    <p className="text-xs text-[#A8A397]">Machine-readable specifications for autonomous agents and institutional buyers.</p>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-[#F5F2E8]">
+                    <input
+                      type="checkbox"
+                      checked={agentCompatible}
+                      onChange={(e) => setAgentCompatible(e.target.checked)}
+                      className="accent-[#C9A45C]"
+                    />
+                    <span className="font-mono text-[#C9A45C] font-semibold text-[11px] uppercase tracking-wider">AI-Agent Compatible</span>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="block text-[10px] uppercase tracking-widest text-[#A8A397]">License Type</label>
+                    <select
+                      value={licenseType}
+                      onChange={(e) => setLicenseType(e.target.value as typeof licenseType)}
+                      className="w-full px-3 py-2.5 bg-[#0A0A09] border border-white/10 text-[#F5F2E8] text-xs"
+                    >
+                      <option value="commercial_use">Commercial Use</option>
+                      <option value="academic_or_research">Academic / Research Only</option>
+                      <option value="exclusive_transfer">Exclusive Ownership Transfer</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[10px] uppercase tracking-widest text-[#A8A397]">Format Specification</label>
+                    <input
+                      type="text"
+                      value={formatSpec}
+                      onChange={(e) => setFormatSpec(e.target.value)}
+                      placeholder="e.g. Parquet, GGUF, OpenAPI Key, Docker"
+                      className="w-full px-3 py-2.5 bg-[#0A0A09] border border-white/10 text-[#F5F2E8] text-xs font-mono"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[10px] uppercase tracking-widest text-[#A8A397]">Geographic Region</label>
+                    <input
+                      type="text"
+                      value={region}
+                      onChange={(e) => setRegion(e.target.value)}
+                      placeholder="e.g. Global, Southeast Asia, US"
+                      className="w-full px-3 py-2.5 bg-[#0A0A09] border border-white/10 text-[#F5F2E8] text-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[10px] uppercase tracking-widest text-[#A8A397]">Primary Language</label>
+                    <input
+                      type="text"
+                      value={language}
+                      onChange={(e) => setLanguage(e.target.value)}
+                      placeholder="e.g. Multilingual, English, Indonesian"
+                      className="w-full px-3 py-2.5 bg-[#0A0A09] border border-white/10 text-[#F5F2E8] text-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[10px] uppercase tracking-widest text-[#A8A397]">Data Period / Checkpoint</label>
+                    <input
+                      type="text"
+                      value={dataPeriod}
+                      onChange={(e) => setDataPeriod(e.target.value)}
+                      placeholder="e.g. 2024 - 2026, Q1 2026 Checkpoint"
+                      className="w-full px-3 py-2.5 bg-[#0A0A09] border border-white/10 text-[#F5F2E8] text-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[10px] uppercase tracking-widest text-[#A8A397]">Update Frequency</label>
+                    <select
+                      value={updateFrequency}
+                      onChange={(e) => setUpdateFrequency(e.target.value as typeof updateFrequency)}
+                      className="w-full px-3 py-2.5 bg-[#0A0A09] border border-white/10 text-[#F5F2E8] text-xs"
+                    >
+                      <option value="one_time">One-time Snapshot</option>
+                      <option value="monthly">Monthly Recurring</option>
+                      <option value="streaming">Real-time / Streaming Access</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] uppercase tracking-widest text-[#A8A397]">Usage Rights & Terms</label>
+                  <input
+                    type="text"
+                    value={usageRights}
+                    onChange={(e) => setUsageRights(e.target.value)}
+                    placeholder="e.g. Commercial redistribution permitted with attribution"
+                    className="w-full px-3 py-2.5 bg-[#0A0A09] border border-white/10 text-[#F5F2E8] text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] uppercase tracking-widest text-[#A8A397]">Technical Schema / Specification (Optional)</label>
+                  <textarea
+                    rows={2}
+                    value={schemaOrSpec}
+                    onChange={(e) => setSchemaOrSpec(e.target.value)}
+                    placeholder="e.g. Columns: timestamp, user_id, action, latency_ms (or Model arch details)"
+                    className="w-full px-3 py-2.5 bg-[#0A0A09] border border-white/10 text-[#F5F2E8] text-xs font-mono"
+                  />
+                </div>
               </div>
             </div>
 

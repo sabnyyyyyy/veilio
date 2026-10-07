@@ -839,8 +839,14 @@ export default function AuctionDetailPage() {
 
           {/* DETAILS */}
           <div>
-            <div className="mb-2">
+            <div className="mb-2 flex items-center justify-between">
               <span className="text-[#A8A397] text-[10px] uppercase font-bold tracking-widest">DIGITAL ASSET · {datasetMeta?.assetType || 'DATASET'}</span>
+              <Link
+                href={`/verify/${auction.id}`}
+                className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-[#C9A45C] hover:text-[#E6CC91] transition"
+              >
+                Proof of Auction ↗
+              </Link>
             </div>
             <h1 className="text-4xl lg:text-5xl font-extrabold tracking-tight text-[#F5F2E8]">
               {auction.itemName}
@@ -967,7 +973,7 @@ export default function AuctionDetailPage() {
                       </div>
                       <a href={`${bnbChain.blockExplorers.default.url}/tx/${commitTxHash}`} target="_blank" rel="noreferrer"
                         className="block text-center text-xs font-semibold text-[#C9A45C] hover:underline">
-                        View transaction on BohrScan ↗
+                        View transaction on BscScan ↗
                       </a>
                       <p className="text-center text-xs text-[#A8A397]">Secret saved locally. Return here to reveal after commit phase ends.</p>
                     </div>
@@ -1042,7 +1048,7 @@ export default function AuctionDetailPage() {
                       </div>
                       <a href={`${bnbChain.blockExplorers.default.url}/tx/${revealTxHash}`} target="_blank" rel="noreferrer"
                         className="block text-center text-xs font-semibold text-[#C9A45C] hover:underline">
-                        View transaction on BohrScan ↗
+                        View transaction on BscScan ↗
                       </a>
                     </div>
                   ) : alreadyRevealed ? (
@@ -1119,7 +1125,7 @@ export default function AuctionDetailPage() {
                       </div>
                       <a href={`${bnbChain.blockExplorers.default.url}/tx/${settleTxHash}`} target="_blank" rel="noreferrer"
                         className="block text-center text-xs font-semibold text-[#C9A45C] hover:underline">
-                        View settlement transaction on BohrScan ↗
+                        View settlement transaction on BscScan ↗
                       </a>
                     </div>
                   )}
@@ -1332,7 +1338,7 @@ export default function AuctionDetailPage() {
                               </div>
                               <a href={`${bnbChain.blockExplorers.default.url}/tx/${withdrawTxHash}`} target="_blank" rel="noreferrer"
                                 className="block text-xs font-semibold text-emerald-400 hover:underline">
-                                View on BohrScan ↗
+                                View on BscScan ↗
                               </a>
                             </div>
                           ) : (
@@ -1375,7 +1381,7 @@ export default function AuctionDetailPage() {
                               </div>
                               <a href={`${bnbChain.blockExplorers.default.url}/tx/${withdrawTxHash}`} target="_blank" rel="noreferrer"
                                 className="block text-xs font-semibold text-[#C9A45C] hover:underline">
-                                View on BohrScan ↗
+                                View on BscScan ↗
                               </a>
                             </div>
                           ) : (
@@ -1412,7 +1418,7 @@ export default function AuctionDetailPage() {
                               </div>
                               <a href={`${bnbChain.blockExplorers.default.url}/tx/${withdrawTxHash}`} target="_blank" rel="noreferrer"
                                 className="block text-xs font-semibold text-[#C9A45C] hover:underline">
-                                View on BohrScan ↗
+                                View on BscScan ↗
                               </a>
                             </div>
                           ) : (

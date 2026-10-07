@@ -3,6 +3,7 @@ import { formatEther } from 'viem';
 import type { AuctionItem } from './mockAuctions';
 import { VEIL_V3_ABI, VEIL_V3_CONTRACT_ADDRESS } from './contract';
 import { resolveIpfsUri } from './ipfs';
+import { computeParticipantReputation } from './reputation';
 
 type AuctionData = readonly [
   bigint,   // id
@@ -29,7 +30,29 @@ interface AuctionMetadata {
   name?: string;
   description?: string;
   image?: string;
-  asset?: { assetType?: string };
+  asset?: {
+    assetType?: string;
+    category?: string;
+    licenseType?: string;
+    usageRights?: string;
+    format?: string;
+    fileSize?: string;
+    region?: string;
+    language?: string;
+    dataPeriod?: string;
+    updateFrequency?: string;
+    schemaOrSpecification?: string;
+    agentCompatible?: boolean;
+    [key: string]: unknown;
+  };
+  dataset?: {
+    datasetId?: string;
+    fileName?: string;
+    size?: number;
+    mimeType?: string;
+    manifest?: { format?: string; recordCount?: number };
+    [key: string]: unknown;
+  };
 }
 
 export async function fetchOnchainAuctions(
@@ -85,6 +108,7 @@ export async function fetchOnchainAuctions(
       let finalDescription = description;
       let finalImageURI = imageURI;
       let assetType = 'dataset';
+      let parsedMetadata: AuctionItem['metadata'] = undefined;
 
       // If imageURI contains an IPFS metadata JSON or local metadata, try to read it.
       if (
@@ -107,18 +131,24 @@ export async function fetchOnchainAuctions(
               try {
                 const metadata = (await response.json()) as AuctionMetadata;
 
-                if (metadata.name) {
-                  finalItemName = metadata.name;
-                }
-
-                if (metadata.description) {
-                  finalDescription = metadata.description;
-                }
-
-                if (metadata.image) {
-                  finalImageURI = metadata.image;
-                }
+                if (metadata.name) finalItemName = metadata.name;
+                if (metadata.description) finalDescription = metadata.description;
+                if (metadata.image) finalImageURI = metadata.image;
                 if (metadata.asset?.assetType) assetType = metadata.asset.assetType;
+
+                parsedMetadata = {
+                  category: (metadata.asset?.category || assetType) as any,
+                  licenseType: metadata.asset?.licenseType as any,
+                  usageRights: metadata.asset?.usageRights,
+                  format: metadata.asset?.format || metadata.dataset?.manifest?.format,
+                  fileSize: metadata.asset?.fileSize || (metadata.dataset?.size ? `${(metadata.dataset.size / (1024 * 1024)).toFixed(1)} MB` : undefined),
+                  region: metadata.asset?.region,
+                  language: metadata.asset?.language,
+                  dataPeriod: metadata.asset?.dataPeriod,
+                  updateFrequency: metadata.asset?.updateFrequency as any,
+                  schemaOrSpecification: metadata.asset?.schemaOrSpecification,
+                  agentCompatible: metadata.asset?.agentCompatible ?? true,
+                };
               } catch {
                 // Content was not parseable as JSON — might be a direct image URI
               }
@@ -141,6 +171,16 @@ export async function fetchOnchainAuctions(
         imageURI: finalImageURI, startingPrice: formatEther(startingPrice),
         bidderCount: Number(bidderCount), commitEndTime: commitEndMs,
         revealEndTime: revealEndMs, status, seller, assetType,
+        metadata: parsedMetadata,
+        sellerReputation: (() => {
+          const rep = computeParticipantReputation(seller, { role: 'seller' });
+          return {
+            completedAuctions: rep.completedAuctions,
+            deliverySuccessRate: rep.deliverySuccessRate ?? 0,
+            verifiedSeller: rep.verifiedStatus,
+            score: rep.reliabilityScore ?? 70,
+          };
+        })(),
       } as AuctionItem;
     } catch (error) {
       console.error(`Failed to load auction ${auctionId}:`, error);

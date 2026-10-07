@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useAccount, useWriteContract } from 'wagmi';
 import { parseEther } from 'viem';
-import { BLINDBID_CONTRACT_ADDRESS, BLINDBID_ABI } from '@/lib/contract';
+import { VEIL_V3_CONTRACT_ADDRESS, VEIL_V3_ABI } from '@/lib/contract';
 import { computeCommitmentHash, generateRandomSecret } from '@/lib/commitment';
 import { saveBidSecret, getBidSecret, saveUserActivity } from '@/lib/secretStorage';
 import { bnbChain } from '@/lib/chain';
@@ -63,8 +63,8 @@ export default function BidPanel({
 
       // Submit commitment transaction to contract
       const txHash = await writeContractAsync({
-        address: BLINDBID_CONTRACT_ADDRESS,
-        abi: BLINDBID_ABI,
+        address: VEIL_V3_CONTRACT_ADDRESS,
+        abi: VEIL_V3_ABI,
         functionName: 'commitBid',
         args: [BigInt(auctionId), commitment],
         value: parseEther(maxBidAmount),
@@ -85,8 +85,8 @@ export default function BidPanel({
     try {
       setIsSubmitting(true);
       const txHash = await writeContractAsync({
-        address: BLINDBID_CONTRACT_ADDRESS,
-        abi: BLINDBID_ABI,
+        address: VEIL_V3_CONTRACT_ADDRESS,
+        abi: VEIL_V3_ABI,
         functionName: 'revealBid',
         args: [BigInt(auctionId), parseEther(existingSecret.maxBid), existingSecret.secret],
       });
@@ -124,8 +124,8 @@ export default function BidPanel({
     try {
       setIsSubmitting(true);
       const txHash = await writeContractAsync({
-        address: BLINDBID_CONTRACT_ADDRESS,
-        abi: BLINDBID_ABI,
+        address: VEIL_V3_CONTRACT_ADDRESS,
+        abi: VEIL_V3_ABI,
         functionName: 'withdrawRefund',
       });
 
@@ -391,7 +391,7 @@ export default function BidPanel({
             <div className="flex justify-between">
               <span className="text-[#A8A397]">Contract</span>
               <span className="font-mono text-[#F5F2E8]">
-                {BLINDBID_CONTRACT_ADDRESS.substring(0, 6)}...{BLINDBID_CONTRACT_ADDRESS.substring(38)}
+                {VEIL_V3_CONTRACT_ADDRESS.substring(0, 6)}...{VEIL_V3_CONTRACT_ADDRESS.substring(38)}
               </span>
             </div>
             {(secretHash || existingSecret?.commitment) && (

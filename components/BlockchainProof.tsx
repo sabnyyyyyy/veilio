@@ -6,7 +6,7 @@ import Link from 'next/link';
 export default function BlockchainProof() {
   return (
     <div className="bg-[#0A0A09]">
-      {/* WHY BLINDBID SECTION */}
+      {/* WHY VEILIO SECTION */}
       <section className="py-24 border-t border-white/5">
         <div className="max-w-7xl mx-auto px-6">
           <div className="max-w-3xl space-y-6">
@@ -67,7 +67,7 @@ export default function BlockchainProof() {
       <section className="py-28 border-t border-white/5 text-center">
         <div className="max-w-3xl mx-auto px-6 space-y-8">
           <h3 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-[#F5F2E8] uppercase">
-            READY TO PLACE A BLIND BID?
+            READY TO ENTER A SEALED AUCTION?
           </h3>
           <div className="pt-2">
             <Link

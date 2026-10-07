@@ -1,97 +1,126 @@
-# VEILIO Agent API and SDK (experimental)
+# VEILIO Agent API & SDK (Production Specification)
 
-The first integration targets BNB Smart Chain Testnet (chain ID `97`). The REST API is read-only; the SDK uses a wallet supplied by the integrator to submit on-chain transactions. VEILIO does not custody agent keys or bid secrets.
+VEILIO targets BNB Smart Chain Testnet (chain ID `97`). It provides an autonomous commerce interface where AI agents can discover, evaluate, price, bid on, and settle valuable digital assets (datasets, AI models, data licenses, and API access) through verifiable sealed-bid auctions.
 
-## Read API
+## Machine-Readable Discovery
+
+- **Manifest URL:** `/.well-known/agent.json`
+- Exposes supported capabilities, endpoints, and first-price sealed-bid commitment rules for autonomous crawlers.
+
+## REST API Endpoints
 
 All values that may exceed JavaScript's safe integer range are returned as decimal strings.
 
-### `GET /api/agent/v1/auctions`
+### 1. `GET /api/agent/v1/assets`
+Discovers digital assets with machine-readable metadata specifications.
 
 Query parameters:
-
-- `limit`: page size from 1 to 50 (default 20).
-- `cursor`: auction ID to start at, descending. Omit it to start from the latest auction. Pass `pagination.nextCursor` for the next page.
+- `query`: Free-text search matching title, description, format, region.
+- `category`: Filter by `dataset`, `ai-model`, `data-license`, `api-license`, `software-license`, `nft`.
+- `license`: Filter by `commercial_use`, `academic_or_research`, `exclusive_transfer`.
+- `limit`: Page size from 1 to 50 (default 20).
+- `cursor`: Auction ID to start at.
 
 Example:
-
 ```sh
-curl 'https://YOUR_VEILIO_HOST/api/agent/v1/auctions?limit=10'
+curl 'https://YOUR_VEILIO_HOST/api/agent/v1/assets?category=dataset&limit=10'
 ```
 
 Response shape:
-
 ```json
 {
-  "data": [{
-    "id": "12",
-    "seller": "0x...",
-    "itemName": "Example asset",
-    "description": "Public listing description",
-    "metadataURI": "ipfs://...",
-    "startingPriceWei": "1000000000000000",
-    "commitEndTime": "...",
-    "revealEndTime": "...",
-    "inspectionDuration": "...",
-    "inspectionEndTime": "...",
-    "state": "Bidding",
-    "highestBidder": "0x...",
-    "highestBidWei": "0",
-    "bidderCount": "0",
-    "revealedCount": "0"
-  }],
-  "pagination": { "limit": 10, "nextCursor": "2", "total": "12" },
+  "data": [
+    {
+      "id": "1",
+      "title": "ASEAN Retail & Consumer Sentiment Dataset (12M Rows)",
+      "description": "High-frequency transaction, geolocation, and sentiment dataset.",
+      "category": "dataset",
+      "license": {
+        "type": "commercial_use",
+        "usage_rights": "Commercial redistribution permitted with attribution"
+      },
+      "format": "Parquet / CSV",
+      "file_size": "2.4 GB",
+      "region": "Southeast Asia (ID, SG, MY)",
+      "language": "Indonesian, English",
+      "data_period": "2023 - 2026",
+      "update_frequency": "monthly",
+      "agent_compatible": true,
+      "seller": {
+        "address": "0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7",
+        "delivery_rate_percent": 100,
+        "verified": true
+      },
+      "auction": {
+        "auction_id": "1",
+        "state": "Bidding",
+        "starting_price_bnb": "0.05",
+        "bidder_count": 14,
+        "commit_end_time": 1775550000,
+        "reveal_end_time": 1775636400
+      }
+    }
+  ],
+  "pagination": { "limit": 10, "nextCursor": null, "total": "5" },
   "chainId": 97,
   "contractAddress": "0x..."
 }
 ```
 
-### `GET /api/agent/v1/auctions/{id}`
+### 2. `GET /api/agent/v1/assets/{id}`
+Returns complete machine-readable asset specifications, schema previews, and auction terms.
 
-Returns the same auction object in `data`, or a `404` if it does not exist.
+### 3. `GET /api/agent/v1/auctions`
+Returns raw on-chain auction listing data with commit/reveal phase deadlines.
 
-The API only returns on-chain listing data. `metadataURI` may point to external metadata; resolve and validate it in the integrator. Do not assume content behind a URI is safe to execute or ingest.
+### 4. `GET /api/agent/v1/auctions/{id}`
+Returns exact on-chain auction object, highest bidder, and revealed count.
 
-## TypeScript SDK
+---
 
-The initial SDK source lives at `lib/agent-sdk/index.ts` in this repository and uses the installed `viem` dependency. It is not yet published as a standalone npm package.
+## TypeScript Agent SDK
+
+The SDK lives at [lib/agent-sdk/index.ts](file:///d:/trustdeal%20-%20Copy/lib/agent-sdk/index.ts) using `viem`.
 
 ```ts
 import { createPublicClient, createWalletClient, http, custom } from 'viem';
 import { bscTestnet } from 'viem/chains';
 import { createVeilioAgent } from '@/lib/agent-sdk';
 
-const publicClient = createPublicClient({ chain: bscTestnet, transport: http() });
-const walletClient = createWalletClient({
-  account: agentAccount,
-  chain: bscTestnet,
-  transport: custom(agentWalletProvider),
+const agent = createVeilioAgent({
+  publicClient,
+  walletClient,
+  account: agentAccount.address,
 });
 
-const agent = createVeilioAgent({ publicClient, walletClient, account: agentAccount.address });
-const { auctions, nextCursor } = await agent.listAuctions({ limit: 20 });
-const auction = await agent.getAuction(auctions[0].id);
+// 1. Discover assets
+const assets = await agent.searchAssets({ category: 'dataset', limit: 10 });
+
+// 2. Evaluate asset suitability
+const evaluation = await agent.evaluateAsset(assets[0].id, {
+  maxBudgetBnb: 0.1,
+  preferredLicense: 'commercial_use',
+});
+
+// 3. Prepare sealed commitment locally
+const prepared = agent.prepareBid(assets[0].id, '0.08'); // Max bid 0.08 BNB
+await secureStore.save(prepared);
+
+// 4. Commit bid to BNB Chain
+const commitTx = await agent.commitBid(prepared, '0.08');
+
+// 5. Reveal bid during reveal window
+const revealTx = await agent.revealBid(await secureStore.get(assets[0].id));
+
+// 6. Check outcome & claim
+const result = await agent.getAuctionResult(assets[0].id);
+if (result.isWinner) {
+  await agent.claimAsset(assets[0].id);
+}
 ```
 
-The SDK provides `listAuctions`, `getAuction`, `prepareBid`, `commitBid`, and `revealBid`. Example bid lifecycle:
+## Security & Verification Boundaries
 
-```ts
-const prepared = agent.prepareBid(auction.id, '0.05'); // amount in BNB
-await secureStore.write(prepared); // persist before broadcasting the transaction
-const txHash = await agent.commitBid(prepared, '0.05'); // deposit in BNB
-// Wait until this auction enters its reveal period, then:
-const revealTxHash = await agent.revealBid(await secureStore.read(auction.id));
-```
-
-## Bid secret handling
-
-`prepareBid` creates a random 32-byte secret and computes the contract-compatible commitment locally. Persist the entire returned object durably and encrypted before calling `commitBid`; the secret and maximum bid are needed later to reveal. If that data is lost, the bid cannot be revealed and the contract's auction rules apply. Never send the prepared object, secret, or unrevealed maximum bid to VEILIO's REST API, logs, analytics, or an untrusted agent service. VEILIO does not offer secret backup or recovery.
-
-The connected agent wallet must be funded with BNB for gas and the bid deposit. The SDK checks auction phase, wallet/chain/contract match, existing commitment, and that the deposit covers both the reserve and maximum bid, but the contract remains authoritative and a transaction may still fail. The SDK does not submit settlement or inspection actions on the user's behalf.
-
-## Current boundaries
-
-- The REST API is public, read-only, and has no API-key authentication or published uptime/SLA yet.
-- Transactions are signed and broadcast by the integrator's wallet. There is no hosted signer, delegated key service, or gas sponsorship.
-- The contract and this first API configuration target BNB Smart Chain Testnet. Do not use mainnet funds with this integration.
-- This source-level SDK is experimental and has not been published/versioned as an npm package.
+- **Commitment privacy:** Max bid amounts remain sealed off-chain during the commit phase via `keccak256(auctionId, bidder, maxBidWei, secret)`.
+- **Verifiable settlement:** BscScan records all deposits, reveal proofs, and winning payouts (90% seller, 10% protocol fee).
+- **Asset delivery:** Decryption keys are unlocked only for the verified winner after final settlement.

@@ -18,8 +18,8 @@ export default function Hero() {
             <span className="mt-1.5 block text-[#A8A397]">private auctions<span className="text-[#C9A45C]">.</span></span>
           </h1>
 
-          <p className="mt-5 max-w-[540px] text-[14px] leading-6 text-[#C7C2B7] sm:mt-6 sm:text-[16px] sm:leading-7">
-            Discover datasets, NFTs, licenses, and more.
+          <p className="mt-5 max-w-[620px] text-[14px] leading-6 text-[#C7C2B7] sm:mt-6 sm:text-[16px] sm:leading-7">
+            The private marketplace where humans and AI agents discover, price, and trade datasets, AI models, and licenses through verifiable sealed auctions.
           </p>
 
           <div className="mt-6 flex w-full flex-col justify-center gap-2.5 sm:mt-7 sm:w-auto sm:flex-row sm:items-center sm:gap-5">
