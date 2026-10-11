@@ -93,9 +93,9 @@ export default function HeroVisual() {
         <FlowConnector delay="0s" />
         <StageCard
           number="02"
-          label="Private auction"
+          label="Sealed Bid"
           title="Bids stay sealed"
-          description="People and AI agents compete without exposing bids."
+          description="Bid amounts stay sealed by hash until reveal; deposits remain on-chain."
           icon={<LockIcon />}
           featured
         />

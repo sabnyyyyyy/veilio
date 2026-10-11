@@ -1,10 +1,26 @@
 import React from 'react';
 
 const steps = [
-  { number: '01', title: 'DISCOVER', detail: 'Browse public asset listings.' },
-  { number: '02', title: 'EVALUATE', detail: 'Assess an asset against your goals.' },
-  { number: '03', title: 'COMMIT', detail: 'Submit a bid commitment and a visible BNB deposit.' },
-  { number: '04', title: 'REVEAL', detail: 'Reveal the bid during the reveal phase.' },
+  {
+    number: '01',
+    title: 'DISCOVER',
+    detail: 'Query public dataset and digital asset auctions via REST API or marketplace interface.',
+  },
+  {
+    number: '02',
+    title: 'EVALUATE',
+    detail: 'Assess asset specifications, licensing terms, and reserve prices against agent objectives.',
+  },
+  {
+    number: '03',
+    title: 'COMMIT',
+    detail: 'Submit a hashed bid commitment with an on-chain BNB deposit covering the bid amount.',
+  },
+  {
+    number: '04',
+    title: 'REVEAL',
+    detail: 'Reveal bid value and secret during the reveal window; winning bidder inspects and settles on-chain.',
+  },
 ];
 
 export default function PrivateByDesign() {
@@ -38,7 +54,7 @@ export default function PrivateByDesign() {
 
           <div className="mt-7 flex items-center gap-3 border-t border-white/[0.08] pt-5">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#C9A45C]/30 text-xs text-[#C9A45C]" aria-hidden="true">i</span>
-            <p className="text-xs leading-5 text-[#8E8A80]">Settlement follows the auction rules if the revealed bid wins.</p>
+            <p className="text-xs leading-5 text-[#8E8A80]">Winning bidders inspect deliverables before on-chain fund release; losing deposits become refundable.</p>
           </div>
         </div>
 
@@ -52,14 +68,14 @@ export default function PrivateByDesign() {
           </h2>
           <div className="max-w-xl space-y-4">
             <p className="text-lg leading-8 text-[#F5F2E8] sm:text-xl">
-              Connect an agent wallet to VEILIO. It can explore public listings, evaluate assets, and take part in the same sealed-bid auction flow as other participants.
+              Connect an agent wallet on BNB Smart Chain Testnet (Chain ID 97). Autonomous agents can query public listings, evaluate data assets, and participate in verifiable commit–reveal auctions.
             </p>
             <p className="text-base leading-7 text-[#A8A397]">
-              A commitment hash hides the bid data until reveal. Bidder addresses and deposits remain public on-chain; the current web form deposits the entered maximum bid, so that value can be inferred.
+              A cryptographic hash seals the bid valuation until the reveal window. However, bidder wallet addresses and on-chain BNB deposits are publicly recorded on BNB Chain; if a bidder deposits an amount equal to their maximum bid, observers can infer that valuation ceiling before reveal.
             </p>
           </div>
           <p className="max-w-xl border-l border-[#C9A45C]/50 pl-4 text-xs leading-5 text-[#8E8A80]">
-            Agents can discover auctions through the read-only API. The experimental TypeScript SDK supports wallet-signed bids; it is not yet published as a standalone package.
+            Read-only discovery endpoints require no wallet connection. The experimental TypeScript SDK in this repository provides typed client helpers for wallet-signed transactions; it is not published as an external npm package.
           </p>
           <details className="group max-w-xl border-y border-white/10 py-4">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-xs font-bold tracking-[0.15em] text-[#D6B56D] marker:hidden [&::-webkit-details-marker]:hidden">
@@ -69,21 +85,34 @@ export default function PrivateByDesign() {
             <div className="mt-5 space-y-4">
               <div>
                 <div className="mb-2 flex items-center justify-between text-[10px] font-bold tracking-[0.14em] text-[#A8A397]">
-                  <span>READ AUCTIONS | REST</span><span className="font-mono text-[#77736B]">BNB TESTNET | CHAIN 97</span>
+                  <span>READ AUCTIONS | REST API</span><span className="font-mono text-[#77736B]">BNB CHAIN TESTNET | CHAIN 97</span>
                 </div>
                 <pre className="overflow-x-auto rounded-lg border border-white/[0.08] bg-[#090908] p-3 font-mono text-[11px] leading-5 text-[#E2D4B1]"><code>GET https://veilio.fun/api/agent/v1/auctions?limit=20{'\n'}GET https://veilio.fun/api/agent/v1/auctions/&#123;id&#125;</code></pre>
               </div>
               <div>
-                <div className="mb-2 text-[10px] font-bold tracking-[0.14em] text-[#A8A397]">ILLUSTRATIVE TYPESCRIPT SDK FLOW · EXPERIMENTAL</div>
-                <pre className="overflow-x-auto rounded-lg border border-white/[0.08] bg-[#090908] p-3 font-mono text-[11px] leading-5 text-[#E2D4B1]"><code>{`const agent = createVeilioAgent({ publicClient, walletClient, account });
+                <div className="mb-2 text-[10px] font-bold tracking-[0.14em] text-[#A8A397]">EXPERIMENTAL LOCAL TYPESCRIPT SDK · REPO-ONLY (NOT ON NPM)</div>
+                <pre className="overflow-x-auto rounded-lg border border-white/[0.08] bg-[#090908] p-3 font-mono text-[11px] leading-5 text-[#E2D4B1]"><code>{`// Local import from repository (experimental; not published on npm):
+import { createVeilioAgent } from '@/lib/agent-sdk';
+
+// Initialize with viem clients targeting BNB Chain Testnet (Chain ID 97)
+const agent = createVeilioAgent({ publicClient, walletClient, account: agentAddress });
+
+// 1. Read-only discovery (REST or RPC):
 const { auctions } = await agent.listAuctions({ limit: 20 });
-const bid = agent.prepareBid(auctionId, "0.05"); // maximum bid in BNB
-await secureStore.write(bid.auctionId, bid); // integrator-provided encrypted storage
-await agent.commitBid(bid, "0.08"); // public deposit; must cover max bid
-// During reveal phase:
-await agent.revealBid(await secureStore.read(bid.auctionId));`}</code></pre>
+
+// 2. Off-chain preparation (generates random secret & keccak256 commitment):
+const bid = agent.prepareBid(auctionId, "0.05"); // max bid in BNB
+await secureStore.write(bid.auctionId, bid); // save secret securely (required for reveal)
+
+// 3. Wallet-signed write: commit bid on-chain with deposit covering max bid
+const commitTx = await agent.commitBid(bid, "0.08"); // BNB deposit sent with tx
+
+// 4. Wallet-signed write: reveal bid during active reveal window
+const revealTx = await agent.revealBid(await secureStore.read(bid.auctionId));`}</code></pre>
               </div>
-              <p className="text-[11px] leading-5 text-[#8E8A80]">This is illustrative code: the SDK is available in the repository but is not published as an npm package, and <code>secureStore</code> is an adapter you must implement. Use viem clients configured for BNB Testnet (chain ID 97). Keep the prepared bid secret encrypted and durable; if it is lost, the bid cannot be revealed. The commitment is private until reveal, but the deposit and bidder address are public. <a href="/api/agent/v1/auctions?limit=10" className="text-[#D6B56D] underline decoration-[#D6B56D]/40 underline-offset-2 hover:text-[#F5F2E8]">Open the live auction endpoint</a>.</p>
+              <p className="text-[11px] leading-5 text-[#8E8A80]">
+                <strong className="text-[#C9A45C]">Privacy &amp; Security Note:</strong> Sealed-bid privacy relies on keeping the local <code>bid.secret</code> confidential until the reveal phase. On-chain deposits and bidder addresses are visible on BscScan. If <code>depositAmount</code> equals the maximum bid, observers can infer valuation bounds before reveal. The local SDK is experimental and not published to npm. Store <code>bid.secret</code> in durable, encrypted storage—lost secrets prevent bid reveals. <a href="/api/agent/v1/auctions?limit=10" className="text-[#D6B56D] underline decoration-[#D6B56D]/40 underline-offset-2 hover:text-[#F5F2E8]">Open live auction endpoint</a>.
+              </p>
             </div>
           </details>
           <a href="/auctions" className="inline-flex items-center gap-3 pt-1 text-xs font-bold tracking-[0.16em] text-[#D6B56D] transition-colors hover:text-[#F5F2E8]">

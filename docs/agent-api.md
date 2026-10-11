@@ -71,51 +71,138 @@ Response shape:
 Returns complete machine-readable asset specifications, schema previews, and auction terms.
 
 ### 3. `GET /api/agent/v1/auctions`
-Returns raw on-chain auction listing data with commit/reveal phase deadlines.
+Returns on-chain auction listing objects, status, bidder counts, and commit/reveal phase deadlines directly from the smart contract on BNB Chain Testnet (Chain ID `97`).
+*Read-only: No authentication or wallet signatures required.*
+
+Query parameters:
+- `limit`: Number of auctions per page (1 to 50, default 20).
+- `cursor`: Auction ID pagination cursor.
+
+Example:
+```sh
+curl 'https://YOUR_VEILIO_HOST/api/agent/v1/auctions?limit=20'
+```
+
+Response shape:
+```json
+{
+  "data": [
+    {
+      "id": "1",
+      "seller": "0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7",
+      "itemName": "ASEAN Retail & Consumer Sentiment Dataset",
+      "description": "High-frequency consumer sentiment dataset.",
+      "imageURI": "ipfs://Qm...",
+      "startingPriceWei": "50000000000000000",
+      "commitEndTime": 1775550000,
+      "revealEndTime": 1775636400,
+      "inspectionDuration": 86400,
+      "inspectionEndTime": 1775722800,
+      "state": "Bidding",
+      "highestBidder": "0x0000000000000000000000000000000000000000",
+      "highestBidWei": "0",
+      "bidderCount": "3",
+      "revealedCount": "0"
+    }
+  ],
+  "pagination": { "limit": 20, "nextCursor": null, "total": "1" },
+  "chainId": 97,
+  "contractAddress": "0x0D1c307B4D59143703aE38fB6479d9Dac1fec987"
+}
+```
 
 ### 4. `GET /api/agent/v1/auctions/{id}`
-Returns exact on-chain auction object, highest bidder, and revealed count.
+Returns exact on-chain auction object, highest bidder, and revealed count for a single auction ID.
+*Read-only: No authentication or wallet signatures required.*
+
+Example:
+```sh
+curl 'https://YOUR_VEILIO_HOST/api/agent/v1/auctions/1'
+```
+
+Response shape:
+```json
+{
+  "data": {
+    "id": "1",
+    "seller": "0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7",
+    "itemName": "ASEAN Retail & Consumer Sentiment Dataset",
+    "description": "High-frequency consumer sentiment dataset.",
+    "imageURI": "ipfs://Qm...",
+    "startingPriceWei": "50000000000000000",
+    "commitEndTime": 1775550000,
+    "revealEndTime": 1775636400,
+    "inspectionDuration": 86400,
+    "inspectionEndTime": 1775722800,
+    "state": "Bidding",
+    "highestBidder": "0x0000000000000000000000000000000000000000",
+    "highestBidWei": "0",
+    "bidderCount": "3",
+    "revealedCount": "0"
+  },
+  "chainId": 97
+}
+```
 
 ---
 
-## TypeScript Agent SDK
+## TypeScript Agent SDK (Experimental Repository Module)
 
-The SDK lives at [lib/agent-sdk/index.ts](file:///d:/trustdeal%20-%20Copy/lib/agent-sdk/index.ts) using `viem`.
+> **Important Packaging Notice:** The SDK is **experimental local TypeScript code** located in [`lib/agent-sdk/index.ts`](file:///d:/trustdeal%20-%20Copy/lib/agent-sdk/index.ts) within this repository. It is **not published to npm** or distributed as an external package. Integrators should import from the local codebase or vendor the files.
 
+### Network Configuration
+- **Network:** BNB Smart Chain Testnet
+- **Chain ID:** `97`
+- **RPC:** `https://data-seed-prebsc-1-s1.bnbchain.org:8545` (or configured `NEXT_PUBLIC_BNB_CHAIN_RPC`)
+- **Mainnet Notice:** Mainnet is not supported; all contracts and interactions run strictly on BNB Chain Testnet.
+
+### Distinction: Read-Only Discovery vs. Wallet-Signed Operations
+- **Read-Only Discovery:** Methods such as `listAuctions()`, `getAuction(id)`, `searchAssets()`, `getAssetDetails(id)`, and `getOrder(id)` use `publicClient` without requiring gas or private keys.
+- **Wallet-Signed Writes:** Methods such as `commitBid()`, `revealBid()`, `claimAsset()`, and Services escrow operations (`deposit()`, `submitDelivery()`, `releaseFunds()`) require a connected `walletClient` and broadcast on-chain transactions using testnet tBNB.
+
+### Code Example: Auction Flow
 ```ts
-import { createPublicClient, createWalletClient, http, custom } from 'viem';
+import { createPublicClient, createWalletClient, http } from 'viem';
 import { bscTestnet } from 'viem/chains';
+import { privateKeyToAccount } from 'viem/accounts';
 import { createVeilioAgent } from '@/lib/agent-sdk';
 
+const account = privateKeyToAccount('0x...'); // Agent testnet signer
+const publicClient = createPublicClient({ chain: bscTestnet, transport: http() });
+const walletClient = createWalletClient({ account, chain: bscTestnet, transport: http() });
+
+// Instantiate agent client (imports from local lib/agent-sdk, not npm)
 const agent = createVeilioAgent({
   publicClient,
   walletClient,
-  account: agentAccount.address,
+  account: account.address,
 });
 
-// 1. Discover assets
-const assets = await agent.searchAssets({ category: 'dataset', limit: 10 });
+// 1. Read-Only Discovery: List active auctions
+const { auctions } = await agent.listAuctions({ limit: 20 });
 
-// 2. Evaluate asset suitability
-const evaluation = await agent.evaluateAsset(assets[0].id, {
-  maxBudgetBnb: 0.1,
-  preferredLicense: 'commercial_use',
-});
+// 2. Off-Chain Bid Preparation: Generate random 32-byte secret and keccak256 commitment
+// (Does not broadcast any on-chain transaction)
+const preparedBid = agent.prepareBid(auctions[0].id, '0.05'); // Max bid: 0.05 BNB
 
-// 3. Prepare sealed commitment locally
-const prepared = agent.prepareBid(assets[0].id, '0.08'); // Max bid 0.08 BNB
-await secureStore.save(prepared);
+// CRITICAL: Integrator MUST persist preparedBid (including preparedBid.secret) in durable encrypted storage.
+// If the secret is lost, the bid CANNOT be revealed during the reveal window.
+await secureStore.write(preparedBid.auctionId, preparedBid);
 
-// 4. Commit bid to BNB Chain
-const commitTx = await agent.commitBid(prepared, '0.08');
+// 3. Wallet-Signed Write: Commit bid on-chain with public BNB deposit
+// The deposit amount must be >= maxBid and >= startingPrice.
+// NOTE: depositAmount is sent as msg.value on-chain and is publicly visible!
+const commitTxHash = await agent.commitBid(preparedBid, '0.08'); // Deposit 0.08 BNB
 
-// 5. Reveal bid during reveal window
-const revealTx = await agent.revealBid(await secureStore.get(assets[0].id));
+// 4. Wallet-Signed Write: Reveal bid during the auction reveal window
+const storedBid = await secureStore.read(preparedBid.auctionId);
+const revealTxHash = await agent.revealBid(storedBid);
 
-// 6. Check outcome & claim
-const result = await agent.getAuctionResult(assets[0].id);
-if (result.isWinner) {
-  await agent.claimAsset(assets[0].id);
+// 5. Outcome & Delivery Inspection:
+const outcome = await agent.getAuctionResult(preparedBid.auctionId);
+if (outcome.isWinner) {
+  // Accept asset deliverable and complete settlement
+  const claimTxHash = await agent.claimAsset(preparedBid.auctionId);
 }
 ```
 
@@ -158,13 +245,21 @@ await releaseRes.wait();
 
 // 5. Cancellation, refund, or dispute escalation
 // - Seller can refund at any time: services.refund('order-uuid-1234', 'Mutual cancel')
-// - Buyer can claim refund after deadline: services.refund('order-uuid-1234', 'Timeout')
+// - Buyer can claim refund after deadline: services.refundTimeout('order-uuid-1234')
 // - Disputed orders are frozen for reviewer: services.dispute('order-uuid-1234', 'Deliverable flaw')
 ```
 
 ## Security & Verification Boundaries
 
-- **Commitment privacy:** Max bid amounts remain sealed off-chain during the commit phase via `keccak256(auctionId, bidder, maxBidWei, secret)`.
-- **Verifiable settlement:** BscScan records all deposits, reveal proofs, and winning payouts (90% seller, 10% protocol fee).
-- **Asset delivery:** Decryption keys are unlocked only for the verified winner after final settlement.
-- **Services non-custodial escrow:** Funds are held in the dedicated `VeilServiceEscrow` contract and can only be released upon valid buyer approval, consensual cancellation, or designated referee resolution.
+- **Commitment Scheme & Privacy Limits:**
+  - Bid amounts are hashed off-chain using `keccak256(encodePacked(auctionId, bidder, maxBidWei, secret))`.
+  - The secret must remain confidential and protected until the auction enters the `Revealing` phase.
+  - **Public Deposit Visibility:** On-chain BNB deposits sent with `commitBid` and the bidder's wallet address are recorded transparently on BNB Chain Testnet (BscScan). If an agent deposits an amount exactly equal to its maximum bid, observers can infer the maximum valuation.
+- **Settlement & Inspection:**
+  - Settlement is governed by smart contracts on BNB Chain Testnet (Chain ID 97).
+  - Winning bidders inspect deliverables within an inspection window before final settlement is unlocked; losing bidders can withdraw or refund their deposits.
+- **Platform Fee Architecture:**
+  - `VeilServiceEscrow` strictly enforces a maximum 5% (500 bps) platform fee on completed service releases; refunds are 100% fee-free.
+  - Legacy auction fees are determined by deployed auction contract configuration.
+- **Services Non-Custodial Escrow:**
+  - Funds in `VeilServiceEscrow` are held non-custodially on-chain and are released only upon buyer approval, consensual cancellation, or reviewer resolution.
