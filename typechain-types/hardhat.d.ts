@@ -42,6 +42,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.MockERC721__factory>;
     getContractFactory(
+      name: "RejectingReceiver",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.RejectingReceiver__factory>;
+    getContractFactory(
       name: "IERC1155Veil",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.IERC1155Veil__factory>;
@@ -53,6 +57,14 @@ declare module "hardhat/types/runtime" {
       name: "VeilNFTV4",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.VeilNFTV4__factory>;
+    getContractFactory(
+      name: "VeilServiceEscrow",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.VeilServiceEscrow__factory>;
+    getContractFactory(
+      name: "VeilServiceRegistry",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.VeilServiceRegistry__factory>;
     getContractFactory(
       name: "VeilV2",
       signerOrOptions?: ethers.Signer | FactoryOptions
@@ -98,6 +110,11 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.MockERC721>;
     getContractAt(
+      name: "RejectingReceiver",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.RejectingReceiver>;
+    getContractAt(
       name: "IERC1155Veil",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -112,6 +129,16 @@ declare module "hardhat/types/runtime" {
       address: string | ethers.Addressable,
       signer?: ethers.Signer
     ): Promise<Contracts.VeilNFTV4>;
+    getContractAt(
+      name: "VeilServiceEscrow",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.VeilServiceEscrow>;
+    getContractAt(
+      name: "VeilServiceRegistry",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.VeilServiceRegistry>;
     getContractAt(
       name: "VeilV2",
       address: string | ethers.Addressable,
@@ -152,6 +179,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.MockERC721>;
     deployContract(
+      name: "RejectingReceiver",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.RejectingReceiver>;
+    deployContract(
       name: "IERC1155Veil",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.IERC1155Veil>;
@@ -163,6 +194,14 @@ declare module "hardhat/types/runtime" {
       name: "VeilNFTV4",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.VeilNFTV4>;
+    deployContract(
+      name: "VeilServiceEscrow",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.VeilServiceEscrow>;
+    deployContract(
+      name: "VeilServiceRegistry",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.VeilServiceRegistry>;
     deployContract(
       name: "VeilV2",
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -208,6 +247,11 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.MockERC721>;
     deployContract(
+      name: "RejectingReceiver",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.RejectingReceiver>;
+    deployContract(
       name: "IERC1155Veil",
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -222,6 +266,16 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.VeilNFTV4>;
+    deployContract(
+      name: "VeilServiceEscrow",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.VeilServiceEscrow>;
+    deployContract(
+      name: "VeilServiceRegistry",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.VeilServiceRegistry>;
     deployContract(
       name: "VeilV2",
       args: any[],

@@ -16,7 +16,7 @@ export default function WhatVeilDoes() {
             <span className="text-[#A8A397]">EVERY ASSET HAS A PATH.</span>
           </h2>
           <p className="text-[17px] md:text-[19px] text-[#A8A397] font-normal leading-[1.6] max-w-[600px]">
-            VEILIO connects digital-asset sellers with human and AI buyers through private bids and on-chain settlement.
+            VEILIO connects digital-asset sellers with human and AI buyers through commit–reveal auctions and on-chain settlement.
           </p>
         </div>
 
@@ -77,7 +77,7 @@ export default function WhatVeilDoes() {
                   COMPETE
                 </h3>
                 <p className="text-[16px] text-[#A8A397] group-hover:text-[#E8E5DC] leading-[1.6] transition-colors duration-300 max-w-[280px]">
-                  Buyers commit a sealed maximum. Bids stay hidden until the reveal phase.
+                  The bid is committed as a hash. Wallet and deposit are public; bids are revealed after the commit phase.
                 </p>
               </div>
             </div>

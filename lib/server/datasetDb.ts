@@ -9,9 +9,21 @@ export interface DatasetRecord {
   auctionId?: string;
   uploader?: string;
   uploadNonce?: string;
-  assetType?: 'dataset' | 'ai-model' | 'nft' | '3d-asset' | 'software-license' | 'digital-media';
-  deliveryMethod?: 'encrypted-download' | 'nft-transfer' | 'license-access';
+  assetType?: 'dataset' | 'ai-model' | 'data-license' | 'api-license' | 'software-license' | 'nft' | 'digital-asset' | '3d-asset' | 'digital-media';
+  deliveryMethod?: 'encrypted-download' | 'nft-transfer' | 'license-access' | 'api-credential';
   assetDetails?: Record<string, string>;
+  professionalMetadata?: {
+    licenseType?: string;
+    usageRights?: string;
+    format?: string;
+    region?: string;
+    language?: string;
+    dataPeriod?: string;
+    updateFrequency?: string;
+    schemaOrSpecification?: string;
+    agentCompatible?: boolean;
+    [key: string]: unknown;
+  };
   fileName: string;
   mimeType: string;
   size: number;
@@ -65,7 +77,7 @@ export function assetStorageConfigurationError(): string | null {
   if (process.env.NODE_ENV !== 'production') return null;
   if (!process.env.BLOB_READ_WRITE_TOKEN) return 'Private Vercel Blob is not configured. Connect a private Blob store to this Vercel project.';
   if (!isAssetRedisConfigured()) return 'Persistent asset metadata storage is not configured. Connect an HTTPS Redis REST database.';
-  if (!process.env.MALWARE_SCAN_API_KEY) return 'Managed malware scanning is not configured. Set MALWARE_SCAN_API_KEY before accepting product files.';
+  if (!process.env.MALWARE_SCAN_API_KEY) return 'Malware scanning is not configured. Set MALWARE_SCAN_API_KEY before accepting product files.';
   return null;
 }
 

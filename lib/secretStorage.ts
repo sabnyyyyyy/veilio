@@ -34,9 +34,12 @@ export interface StoredAuction {
   createdAt: number;
 }
 
-const STORAGE_KEY_PREFIX = 'blindbid_secret_';
-const AUCTIONS_KEY_PREFIX = 'blindbid_user_auction_';
-const ACTIVITIES_KEY_PREFIX = 'blindbid_activity_';
+const STORAGE_KEY_PREFIX = 'veilio_secret_';
+const LEGACY_STORAGE_KEY_PREFIX = 'blindbid_secret_';
+const AUCTIONS_KEY_PREFIX = 'veilio_user_auction_';
+const LEGACY_AUCTIONS_KEY_PREFIX = 'blindbid_user_auction_';
+const ACTIVITIES_KEY_PREFIX = 'veilio_activity_';
+const LEGACY_ACTIVITIES_KEY_PREFIX = 'blindbid_activity_';
 
 export function saveBidSecret(data: StoredSecret) {
   if (typeof window === 'undefined') return;
@@ -59,7 +62,8 @@ export function saveBidSecret(data: StoredSecret) {
 export function getBidSecret(auctionId: string | number, bidder: string): StoredSecret | null {
   if (typeof window === 'undefined') return null;
   const key = `${STORAGE_KEY_PREFIX}${auctionId}_${bidder.toLowerCase()}`;
-  const raw = localStorage.getItem(key);
+  const legacyKey = `${LEGACY_STORAGE_KEY_PREFIX}${auctionId}_${bidder.toLowerCase()}`;
+  const raw = localStorage.getItem(key) || localStorage.getItem(legacyKey);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as StoredSecret;
@@ -71,13 +75,21 @@ export function getBidSecret(auctionId: string | number, bidder: string): Stored
 export function getAllUserSecrets(bidder: string): StoredSecret[] {
   if (typeof window === 'undefined' || !bidder) return [];
   const results: StoredSecret[] = [];
+  const seenIds = new Set<string>();
   const target = bidder.toLowerCase();
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
-    if (key && key.startsWith(STORAGE_KEY_PREFIX) && key.endsWith(`_${target}`)) {
+    if (
+      key &&
+      (key.startsWith(STORAGE_KEY_PREFIX) || key.startsWith(LEGACY_STORAGE_KEY_PREFIX)) &&
+      key.endsWith(`_${target}`)
+    ) {
       try {
-        const item = JSON.parse(localStorage.getItem(key) || '');
-        if (item) results.push(item);
+        const item = JSON.parse(localStorage.getItem(key) || '') as StoredSecret;
+        if (item && item.auctionId && !seenIds.has(String(item.auctionId))) {
+          seenIds.add(String(item.auctionId));
+          results.push(item);
+        }
       } catch (e) {
         // ignore invalid entries
       }
@@ -105,13 +117,21 @@ export function saveCreatedAuction(auction: StoredAuction) {
 export function getUserCreatedAuctions(seller: string): StoredAuction[] {
   if (typeof window === 'undefined' || !seller) return [];
   const results: StoredAuction[] = [];
+  const seenIds = new Set<string>();
   const target = seller.toLowerCase();
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
-    if (key && key.startsWith(AUCTIONS_KEY_PREFIX) && key.endsWith(`_${target}`)) {
+    if (
+      key &&
+      (key.startsWith(AUCTIONS_KEY_PREFIX) || key.startsWith(LEGACY_AUCTIONS_KEY_PREFIX)) &&
+      key.endsWith(`_${target}`)
+    ) {
       try {
-        const item = JSON.parse(localStorage.getItem(key) || '');
-        if (item) results.push(item);
+        const item = JSON.parse(localStorage.getItem(key) || '') as StoredAuction;
+        if (item && item.id && !seenIds.has(String(item.id))) {
+          seenIds.add(String(item.id));
+          results.push(item);
+        }
       } catch (e) {
         // ignore
       }

@@ -5,5 +5,8 @@ export * as maliciousReceiverSol from "./MaliciousReceiver.sol";
 export * as veilNftv4Sol from "./VeilNFTV4.sol";
 export * as mocks from "./mocks";
 export { BlindBid__factory } from "./BlindBid__factory";
+export { RejectingReceiver__factory } from "./RejectingReceiver__factory";
+export { VeilServiceEscrow__factory } from "./VeilServiceEscrow__factory";
+export { VeilServiceRegistry__factory } from "./VeilServiceRegistry__factory";
 export { VeilV2__factory } from "./VeilV2__factory";
 export { VeilV3__factory } from "./VeilV3__factory";

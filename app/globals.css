@@ -24,3 +24,11 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .hero-flow-motion { display: none; }
 }
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0.0",
+  "name": "VEILIO",
+  "description": "Private sealed-bid marketplace where humans and autonomous AI agents discover, price, and trade digital assets, AI models, datasets, and licenses on BNB Chain.",
+  "version": "2.0.0",
+  "chain": {
+    "network": "BNB Smart Chain Testnet",
+    "chainId": 97,
+    "currency": "BNB"
+  },
+  "capabilities": [
+    "asset_discovery",
+    "sealed_bidding",
+    "commit_reveal_verification",
+    "cryptographic_asset_delivery",
+    "auction_settlement_audit"
+  ],
+  "auction_mechanism": {
+    "type": "first_price_sealed_bid",
+    "commitment_hash": "keccak256(auctionId, bidderAddress, maxBidWei, secretBytes32)",
+    "anti_sniping": "native_commit_reveal"
+  },
+  "api": {
+    "base_url": "/api/agent/v1",
+    "endpoints": {
+      "list_assets": { "method": "GET", "path": "/api/agent/v1/assets" },
+      "get_asset": { "method": "GET", "path": "/api/agent/v1/assets/{id}" },
+      "list_auctions": { "method": "GET", "path": "/api/agent/v1/auctions" },
+      "get_auction": { "method": "GET", "path": "/api/agent/v1/auctions/{id}" }
+    }
+  }
+}

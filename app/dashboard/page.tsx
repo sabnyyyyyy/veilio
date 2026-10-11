@@ -186,7 +186,7 @@ export default function DashboardPage() {
               <LayoutDashboard size={13} /> VEILIO / WORKSPACE
             </div>
             <h1 className="text-3xl font-semibold tracking-tight text-[#F5F2E8] sm:text-4xl">Your dashboard<span className="text-[#C9A45C]">.</span></h1>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-[#A8A397]">A clear view of your auctions, private bids, and the next step to take.</p>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-[#A8A397]">A clear view of your auctions, bid commitments, deposits, and next steps.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
             <div className="inline-flex items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.025] px-3 py-2 text-xs text-[#A8A397]">
@@ -243,7 +243,7 @@ export default function DashboardPage() {
             ) : (
               <EmptyPanel
                 title={bids.length ? 'You’re all caught up' : 'No pending actions'}
-                detail={bids.length ? 'We’ll highlight a bid here when its reveal period opens.' : 'Join an auction to keep your private bids and next steps in one place.'}
+                detail={bids.length ? 'We’ll highlight a bid here when its reveal period opens.' : 'Join an auction to track your commitments and next steps in one place.'}
                 href={bids.length ? '/auctions' : '/auctions'}
                 action={bids.length ? 'Browse auctions' : 'Explore auctions'}
               />
@@ -268,7 +268,7 @@ export default function DashboardPage() {
             </div>
             <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3.5">
               <ShieldCheck size={16} className="mt-0.5 shrink-0 text-[#C9A45C]" />
-              <p className="text-[11px] leading-5 text-[#89867D]">Your bid amount stays private during the commit phase. Keep your wallet connected to manage each auction.</p>
+              <p className="text-[11px] leading-5 text-[#89867D]">Track commitments and public deposits during commit; bid values are disclosed during reveal.</p>
             </div>
           </div>
         </section>
@@ -314,7 +314,7 @@ export default function DashboardPage() {
                 ))}
               </div>
             ) : (
-              <EmptyPanel title="Your bids will show up here" detail="Browse open listings and commit a private bid when you find the right asset." href="/auctions" action="Explore auctions" />
+              <EmptyPanel title="Your bids will show up here" detail="Browse listings and submit a commitment when you find the right asset." href="/auctions" action="Explore auctions" />
             )}
           </div>
         </section>

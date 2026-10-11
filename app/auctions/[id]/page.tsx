@@ -3,6 +3,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Shield, Clock, AlertTriangle, EyeOff, Lock, Unlock, Download, ChevronRight, FileSearch } from 'lucide-react';
 import RefundForm from '@/components/RefundForm';
+import AiValidatorPanel from '@/components/transaction/AiValidatorPanel';
+import TransactionChat from '@/components/transaction/TransactionChat';
+import DeliveryReviewPanel from '@/components/transaction/DeliveryReviewPanel';
+import DisputeModal from '@/components/transaction/DisputeModal';
+import type { GeminiValidationOutput } from '@/lib/server/gemini';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useAccount, usePublicClient, useWriteContract, useSignMessage } from 'wagmi';
@@ -43,6 +48,20 @@ interface AssetMetadata {
   assetType?: string; deliveryMethod?: string;
   tokenStandard?: string; tokenAddress?: string; tokenId?: string; tokenAmount?: string; licenseType?: string;
   samplePreview?: { columns: string[]; rows: Array<Record<string, string>> };
+  fileName?: string;
+  size?: number;
+  manifest?: { format?: string; recordCount?: number; columnCount?: number; columns?: string[] };
+  professionalMetadata?: {
+    licenseType?: string;
+    usageRights?: string;
+    format?: string;
+    region?: string;
+    language?: string;
+    dataPeriod?: string;
+    updateFrequency?: string;
+    schemaOrSpecification?: string;
+    [key: string]: unknown;
+  };
 }
 
 interface AuctionMetadata {
@@ -166,10 +185,12 @@ export default function AuctionDetailPage() {
 
   // ── Commit state ─────────────────────────────────────────────────────
   const [maxBidInput, setMaxBidInput] = useState('');
+  const [depositInput, setDepositInput] = useState('');
   const [commitStatus, setCommitStatus] = useState<'idle' | 'confirming' | 'success' | 'error'>('idle');
   const [commitTxHash, setCommitTxHash] = useState<`0x${string}` | null>(null);
   const [commitError, setCommitError] = useState<string | null>(null);
   const [committedMaxBid, setCommittedMaxBid] = useState<string>('');
+  const [committedDeposit, setCommittedDeposit] = useState<string>('');
 
   // ── Reveal state ─────────────────────────────────────────────────────
   const [revealStatus, setRevealStatus] = useState<'idle' | 'confirming' | 'success' | 'error'>('idle');
@@ -411,9 +432,9 @@ export default function AuctionDetailPage() {
     if (!auction) { setCommitError('Auction data not loaded yet.'); return; }
 
     const maxBidTrimmed = maxBidInput.trim();
-    const maxBidNum = parseFloat(maxBidTrimmed);
-    if (!maxBidTrimmed || isNaN(maxBidNum) || maxBidNum <= 0) {
-      setCommitError('Please enter a valid bid amount greater than 0.');
+    const depositTrimmed = depositInput.trim();
+    if (!maxBidTrimmed || !depositTrimmed) {
+      setCommitError('Enter both your maximum bid and the public deposit amount.');
       return;
     }
 
@@ -421,11 +442,15 @@ export default function AuctionDetailPage() {
       setCommitStatus('confirming');
       const secret = generateRandomSecret();
       const maxBidWei = parseEther(maxBidTrimmed);
+      const depositWei = parseEther(depositTrimmed);
+      if (maxBidWei <= 0n) throw new Error('Maximum bid must be greater than zero.');
+      if (maxBidWei < auction.startingPrice) throw new Error(`Maximum bid must be at least ${formatEther(auction.startingPrice)} BNB.`);
+      if (depositWei < maxBidWei) throw new Error('Public deposit must be equal to or greater than your maximum bid.');
       const commitment = computeCommitmentHash(auction.id, address, maxBidTrimmed, secret);
 
       console.log('[CommitBid] auctionId:', auction.id.toString());
       console.log('[CommitBid] bidder:', address);
-      console.log('[CommitBid] maxBid:', maxBidTrimmed, 'BNB');
+      console.log('[CommitBid] maxBid:', maxBidTrimmed, 'BNB; public deposit:', depositTrimmed, 'BNB');
       console.log('[CommitBid] commitment:', commitment);
 
       // commitBid(uint256 auctionId, bytes32 commitment) payable
@@ -434,7 +459,7 @@ export default function AuctionDetailPage() {
         abi: VEIL_V3_ABI,
         functionName: 'commitBid',
         args: [auction.id, commitment],
-        value: maxBidWei,
+        value: depositWei,
       });
 
       console.log('[CommitBid] Tx submitted:', hash);
@@ -448,6 +473,7 @@ export default function AuctionDetailPage() {
       saveBidSecret({ auctionId, bidder: address, maxBid: maxBidTrimmed, secret, commitment, timestamp: Date.now() });
       setCommitTxHash(hash);
       setCommittedMaxBid(maxBidTrimmed);
+      setCommittedDeposit(depositTrimmed);
       setCommitStatus('success');
     } catch (err: unknown) {
       console.error('[CommitBid] Error:', err);
@@ -682,6 +708,29 @@ export default function AuctionDetailPage() {
   }, [auction, address, isConnected, inspectionData]);
 
   const [showRefundForm, setShowRefundForm] = useState(false);
+  const [showDisputeModal, setShowDisputeModal] = useState(false);
+  const [transactionTab, setTransactionTab] = useState<'delivery' | 'chat' | 'validator'>('delivery');
+  const [aiReport, setAiReport] = useState<GeminiValidationOutput | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+
+  const fetchAiValidation = async () => {
+    try {
+      setAiLoading(true);
+      const res = await fetch(`/api/transactions/${auctionId}/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (data.success && data.report) {
+        setAiReport(data.report);
+      }
+    } catch (err) {
+      console.error('Failed to run AI validation:', err);
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   const handleAcceptDataset = async () => {
     try {
@@ -832,8 +881,14 @@ export default function AuctionDetailPage() {
 
           {/* DETAILS */}
           <div>
-            <div className="mb-2">
+            <div className="mb-2 flex items-center justify-between">
               <span className="text-[#A8A397] text-[10px] uppercase font-bold tracking-widest">DIGITAL ASSET · {datasetMeta?.assetType || 'DATASET'}</span>
+              <Link
+                href={`/verify/${auction.id}`}
+                className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-[#C9A45C] hover:text-[#E6CC91] transition"
+              >
+                Proof of Auction ↗
+              </Link>
             </div>
             <h1 className="text-4xl lg:text-5xl font-extrabold tracking-tight text-[#F5F2E8]">
               {auction.itemName}
@@ -946,8 +1001,12 @@ export default function AuctionDetailPage() {
                       </div>
                       <div className="p-4 rounded-xl bg-[#0A0A09] border border-white/10 space-y-2 text-xs">
                         <div className="flex justify-between">
-                          <span className="text-[#A8A397]">Your maximum</span>
+                          <span className="text-[#A8A397]">Maximum bid saved for reveal</span>
                           <span className="font-bold text-[#F5F2E8]">{committedMaxBid} BNB</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-[#A8A397]">Public deposit</span>
+                          <span className="font-bold text-[#F5F2E8]">{committedDeposit} BNB</span>
                         </div>
                         <div className="flex justify-between gap-4">
                           <span className="text-[#A8A397] flex-shrink-0">Tx hash</span>
@@ -956,23 +1015,34 @@ export default function AuctionDetailPage() {
                       </div>
                       <a href={`${bnbChain.blockExplorers.default.url}/tx/${commitTxHash}`} target="_blank" rel="noreferrer"
                         className="block text-center text-xs font-semibold text-[#C9A45C] hover:underline">
-                        View transaction on BohrScan ↗
+                        View transaction on BscScan ↗
                       </a>
                       <p className="text-center text-xs text-[#A8A397]">Secret saved locally. Return here to reveal after commit phase ends.</p>
                     </div>
                   ) : (
                     <>
                       <p className="mt-2 text-sm leading-6 text-[#A8A397]">
-                        Your maximum bid stays hidden from other bidders until the reveal phase.
+                        The commitment hash hides your bid until reveal. Your wallet address and deposit are public on-chain. A deposit equal to your maximum reveals that maximum; a higher deposit only gives others an upper bound. Any excess becomes claimable after you reveal.
                       </p>
+                      <label htmlFor="max-bid-input" className="mt-6 block text-xs font-semibold uppercase tracking-wider text-[#A8A397]">Maximum bid (BNB)</label>
                       <input
                         id="max-bid-input"
-                        type="number" min="0.00001" step="0.00001"
-                        placeholder="Enter maximum bid (BNB)"
+                        type="number" min="0.000000000000000001" step="0.000000000000000001"
+                        placeholder="Your maximum amount"
                         value={maxBidInput}
                         onChange={(e) => { setMaxBidInput(e.target.value); setCommitError(null); if (commitStatus === 'error') setCommitStatus('idle'); }}
                         disabled={commitStatus === 'confirming'}
-                        className="mt-6 w-full rounded-xl border border-white/10 bg-[#0A0A09] px-5 py-4 text-[#F5F2E8] outline-none focus:border-[#C9A45C]/60 disabled:opacity-50"
+                        className="mt-2 w-full rounded-xl border border-white/10 bg-[#0A0A09] px-5 py-4 text-[#F5F2E8] outline-none focus:border-[#C9A45C]/60 disabled:opacity-50"
+                      />
+                      <label htmlFor="public-deposit-input" className="mt-4 block text-xs font-semibold uppercase tracking-wider text-[#A8A397]">Public deposit (BNB)</label>
+                      <input
+                        id="public-deposit-input"
+                        type="number" min="0.000000000000000001" step="0.000000000000000001"
+                        placeholder="Must be at least your maximum bid"
+                        value={depositInput}
+                        onChange={(e) => { setDepositInput(e.target.value); setCommitError(null); if (commitStatus === 'error') setCommitStatus('idle'); }}
+                        disabled={commitStatus === 'confirming'}
+                        className="mt-2 w-full rounded-xl border border-white/10 bg-[#0A0A09] px-5 py-4 text-[#F5F2E8] outline-none focus:border-[#C9A45C]/60 disabled:opacity-50"
                       />
                       {commitError && (
                         <div className="mt-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400">{commitError}</div>
@@ -983,11 +1053,11 @@ export default function AuctionDetailPage() {
                         disabled={commitStatus === 'confirming'}
                         className="mt-4 w-full rounded-xl bg-[#C9A45C] px-5 py-4 font-bold text-[#0A0A09] hover:bg-[#E6CC91] active:scale-[0.98] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {commitStatus === 'confirming' ? 'CONFIRMING…' : 'COMMIT MAXIMUM BID'}
+                        {commitStatus === 'confirming' ? 'CONFIRMING…' : 'COMMIT SEALED BID'}
                       </button>
                       {!isConnected && <p className="mt-3 text-center text-xs text-[#A8A397]">Connect your wallet to place a bid.</p>}
                       {isConnected && commitStatus === 'idle' && (
-                        <p className="mt-3 text-center text-xs text-[#A8A397]">Your bid amount will be locked as a deposit on BNB Chain.</p>
+                        <p className="mt-3 text-center text-xs text-[#A8A397]">Your deposit is locked on BNB Chain; excess over your revealed bid becomes claimable after reveal.</p>
                       )}
                     </>
                   )}
@@ -1020,7 +1090,7 @@ export default function AuctionDetailPage() {
                       </div>
                       <a href={`${bnbChain.blockExplorers.default.url}/tx/${revealTxHash}`} target="_blank" rel="noreferrer"
                         className="block text-center text-xs font-semibold text-[#C9A45C] hover:underline">
-                        View transaction on BohrScan ↗
+                        View transaction on BscScan ↗
                       </a>
                     </div>
                   ) : alreadyRevealed ? (
@@ -1097,7 +1167,7 @@ export default function AuctionDetailPage() {
                       </div>
                       <a href={`${bnbChain.blockExplorers.default.url}/tx/${settleTxHash}`} target="_blank" rel="noreferrer"
                         className="block text-center text-xs font-semibold text-[#C9A45C] hover:underline">
-                        View settlement transaction on BohrScan ↗
+                        View settlement transaction on BscScan ↗
                       </a>
                     </div>
                   )}
@@ -1217,32 +1287,96 @@ export default function AuctionDetailPage() {
                               )}
 
                               {isInspectionOnChain && (
-                                <>
-                                  <p className="text-xs text-[#A8A397] mt-6 mb-4">
-                                    {datasetMeta?.assetType === 'nft' ? 'The NFT is held by VEILIO during inspection. Delivery and payment finalize automatically when inspection expires; report a mismatch here to request a refund.' : 'Does this dataset match the listing? If not, you can report a mismatch.'}
-                                  </p>
+                                <div className="mt-6 space-y-4">
+                                  {/* Workspace Tabs */}
+                                  <div className="flex border-b border-white/10 gap-2 pb-2">
+                                    <button
+                                      onClick={() => setTransactionTab('delivery')}
+                                      className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors ${
+                                        transactionTab === 'delivery'
+                                          ? 'bg-[#C9A45C] text-[#0A0A09]'
+                                          : 'text-[#A8A397] hover:text-[#F5F2E8]'
+                                      }`}
+                                    >
+                                      Verifikasi Delivery
+                                    </button>
+                                    <button
+                                      onClick={() => setTransactionTab('chat')}
+                                      className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors ${
+                                        transactionTab === 'chat'
+                                          ? 'bg-[#C9A45C] text-[#0A0A09]'
+                                          : 'text-[#A8A397] hover:text-[#F5F2E8]'
+                                      }`}
+                                    >
+                                      Transaction Chat
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        setTransactionTab('validator');
+                                        if (!aiReport) fetchAiValidation();
+                                      }}
+                                      className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors ${
+                                        transactionTab === 'validator'
+                                          ? 'bg-[#C9A45C] text-[#0A0A09]'
+                                          : 'text-[#A8A397] hover:text-[#F5F2E8]'
+                                      }`}
+                                    >
+                                      VEILIO AI Validator
+                                    </button>
+                                  </div>
 
-                              {showRefundForm ? (
-                                <RefundForm 
-                                  auctionId={auctionId} 
-                                  listingCriteria={inspectionData || {}}
-                                  onSubmit={async (hash) => {
-                                    await handleRequestRefund(hash);
-                                  }}
-                                  onCancel={() => setShowRefundForm(false)} 
-                                />
-                              ) : (
-                                <div className="flex gap-4">
-                                  {datasetMeta?.assetType !== 'nft' && <button onClick={handleAcceptDataset} className="flex-1 py-3 text-xs font-bold uppercase tracking-wider rounded-xl bg-[#C9A45C] text-[#0A0A09] hover:bg-[#E6CC91] transition-colors">
-                                    {datasetMeta?.assetType === 'dataset' || !datasetMeta?.assetType ? 'Accept Dataset' : 'Confirm Delivery'}
-                                  </button>}
-                                  <button onClick={() => setShowRefundForm(true)} className="flex-1 py-3 text-xs font-bold uppercase tracking-wider rounded-xl bg-transparent border border-[#A8A397]/30 text-[#A8A397] hover:text-[#F5F2E8] hover:border-[#F5F2E8]/50 transition-colors">
-                                    Report Mismatch
-                                  </button>
+                                  {transactionTab === 'delivery' && (
+                                    <DeliveryReviewPanel
+                                      auctionId={auctionId}
+                                      assetType={datasetMeta?.assetType || 'dataset'}
+                                      isWinner={isWinner}
+                                      deliverable={
+                                        datasetMeta
+                                          ? {
+                                              fileName: datasetMeta.fileName,
+                                              size: datasetMeta.size,
+                                              manifest: datasetMeta.manifest,
+                                              professionalMetadata: datasetMeta.professionalMetadata,
+                                            }
+                                          : null
+                                      }
+                                      deliveryStatus={datasetMeta ? 'delivery_submitted' : 'pending_delivery'}
+                                      isInspectionActive={isInspectionOnChain}
+                                      onConfirmDelivery={handleAcceptDataset}
+                                      onOpenChat={() => setTransactionTab('chat')}
+                                      onRequestRefund={() => setShowDisputeModal(true)}
+                                    />
+                                  )}
+
+                                  {transactionTab === 'chat' && (
+                                    <TransactionChat
+                                      transactionId={auctionId}
+                                      currentUserAddress={address || ''}
+                                      isBuyer={isWinner}
+                                      isSeller={normalizeAddress(auction.seller) === normalizeAddress(address || '')}
+                                      onRequestValidation={fetchAiValidation}
+                                    />
+                                  )}
+
+                                  {transactionTab === 'validator' && (
+                                    <AiValidatorPanel
+                                      report={aiReport}
+                                      loading={aiLoading}
+                                      onRefresh={fetchAiValidation}
+                                    />
+                                  )}
+
+                                  <DisputeModal
+                                    auctionId={auctionId}
+                                    buyerAddress={address || ''}
+                                    isOpen={showDisputeModal}
+                                    onClose={() => setShowDisputeModal(false)}
+                                    onSubmitOnchain={async (evidenceHash) => {
+                                      await handleRequestRefund(evidenceHash);
+                                    }}
+                                  />
                                 </div>
                               )}
-                              </>
-                            )}
                             </div>
                           )}
 
@@ -1310,7 +1444,7 @@ export default function AuctionDetailPage() {
                               </div>
                               <a href={`${bnbChain.blockExplorers.default.url}/tx/${withdrawTxHash}`} target="_blank" rel="noreferrer"
                                 className="block text-xs font-semibold text-emerald-400 hover:underline">
-                                View on BohrScan ↗
+                                View on BscScan ↗
                               </a>
                             </div>
                           ) : (
@@ -1353,7 +1487,7 @@ export default function AuctionDetailPage() {
                               </div>
                               <a href={`${bnbChain.blockExplorers.default.url}/tx/${withdrawTxHash}`} target="_blank" rel="noreferrer"
                                 className="block text-xs font-semibold text-[#C9A45C] hover:underline">
-                                View on BohrScan ↗
+                                View on BscScan ↗
                               </a>
                             </div>
                           ) : (
@@ -1390,7 +1524,7 @@ export default function AuctionDetailPage() {
                               </div>
                               <a href={`${bnbChain.blockExplorers.default.url}/tx/${withdrawTxHash}`} target="_blank" rel="noreferrer"
                                 className="block text-xs font-semibold text-[#C9A45C] hover:underline">
-                                View on BohrScan ↗
+                                View on BscScan ↗
                               </a>
                             </div>
                           ) : (

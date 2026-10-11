@@ -80,7 +80,7 @@ function StageCard({
 
 export default function HeroVisual() {
   return (
-    <div className="relative mx-auto w-full max-w-[900px]" aria-label="VEILIO auction process: asset escrow, private bids, verified delivery">
+    <div className="relative mx-auto w-full max-w-[900px]" aria-label="VEILIO auction process: asset escrow, bid commitments, and on-chain settlement">
       <div aria-hidden="true" className="pointer-events-none absolute inset-x-[12%] top-[16%] h-[70%] rounded-full bg-[#C9A45C]/[0.045] blur-[100px]" />
       <div className="relative grid grid-cols-1 items-center gap-0 md:grid-cols-[1fr_64px_1fr_64px_1fr]">
         <StageCard
@@ -93,9 +93,9 @@ export default function HeroVisual() {
         <FlowConnector delay="0s" />
         <StageCard
           number="02"
-          label="Private auction"
+          label="Sealed Bid"
           title="Bids stay sealed"
-          description="People and AI agents compete without exposing bids."
+          description="Bid amounts stay sealed by hash until reveal; deposits remain on-chain."
           icon={<LockIcon />}
           featured
         />

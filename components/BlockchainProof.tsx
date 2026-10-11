@@ -6,7 +6,7 @@ import Link from 'next/link';
 export default function BlockchainProof() {
   return (
     <div className="bg-[#0A0A09]">
-      {/* WHY BLINDBID SECTION */}
+      {/* WHY VEILIO SECTION */}
       <section className="py-24 border-t border-white/5">
         <div className="max-w-7xl mx-auto px-6">
           <div className="max-w-3xl space-y-6">
@@ -17,8 +17,7 @@ export default function BlockchainProof() {
               DON'T BID AGAINST THE SCREEN.
             </h3>
             <p className="text-lg text-[#A8A397] leading-relaxed max-w-2xl">
-              Traditional visible auctions encourage people to react to every new bid. 
-              VEILIO lets participants commit to their maximum independently, removing manipulation and snipers.
+              Commit–reveal prevents bidders from reacting to revealed bid values during the commit phase. Wallet addresses and escrow deposits remain public, and bids become public during reveal.
             </p>
           </div>
         </div>
@@ -48,7 +47,7 @@ export default function BlockchainProof() {
                 TRANSPARENT
               </h4>
               <p className="text-sm text-[#A8A397] leading-relaxed">
-                Settlement follows smart-contract rules automatically without intermediaries or bias.
+                The contract applies winner, fee, and refund rules. Sellers and bidders withdraw their credited balances from the contract.
               </p>
             </div>
 
@@ -57,7 +56,7 @@ export default function BlockchainProof() {
                 VERIFIABLE
               </h4>
               <p className="text-sm text-[#A8A397] leading-relaxed">
-                Anyone can independently verify the final result and cryptographic proof at any time.
+                Auction state, commitments, revealed bids, and completed settlement fields can be inspected on BNB Chain.
               </p>
             </div>
           </div>
@@ -68,7 +67,7 @@ export default function BlockchainProof() {
       <section className="py-28 border-t border-white/5 text-center">
         <div className="max-w-3xl mx-auto px-6 space-y-8">
           <h3 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-[#F5F2E8] uppercase">
-            READY TO PLACE A BLIND BID?
+            READY TO ENTER A SEALED AUCTION?
           </h3>
           <div className="pt-2">
             <Link

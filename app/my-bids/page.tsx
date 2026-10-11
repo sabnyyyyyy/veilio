@@ -71,7 +71,7 @@ export default function MyBidsPage() {
           <div>
             <h1 className="text-3xl font-extrabold text-[#F5F2E8] uppercase">MY BIDS</h1>
             <p className="text-sm text-[#A8A397] mt-1">
-              Track and manage your private bid commitments on BNB Chain.
+              Track your on-chain commitments, public deposits, and reveal deadlines.
             </p>
           </div>
           {Number(refund) > 0 && (

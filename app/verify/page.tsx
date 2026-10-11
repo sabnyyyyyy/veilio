@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { bnbChain } from '@/lib/chain';
-import { VEIL_V2_CONTRACT_ADDRESS } from '@/lib/contract';
+import { VEIL_V3_CONTRACT_ADDRESS } from '@/lib/contract';
 
 export default function VerifyPage() {
   const router = useRouter();
@@ -31,8 +31,7 @@ export default function VerifyPage() {
             Verify an Auction
           </h1>
           <p className="text-sm text-[#A8A397] max-w-lg mx-auto leading-6">
-            Public cryptographic verification of auction outcomes and second-price Vickrey settlement
-            directly from the deployed VEILIO contract on BNB Chain.
+            Read auction status and completed settlement details directly from the active VEILIO contract on BNB Smart Chain Testnet.
           </p>
         </div>
 
@@ -62,7 +61,7 @@ export default function VerifyPage() {
           </div>
 
           <p className="text-xs text-[#A8A397]">
-            Enter any auction ID to verify its existence and settlement status directly on-chain.
+            Enter an auction ID to inspect its on-chain record, winner, winning bid, and fee breakdown when settlement is complete.
           </p>
         </form>
 
@@ -71,7 +70,7 @@ export default function VerifyPage() {
           {[
             { label: 'Network', value: 'BNB Chain Testnet' },
             { label: 'Chain ID', value: '97' },
-            { label: 'Contract', value: `${VEIL_V2_CONTRACT_ADDRESS.substring(0, 6)}…${VEIL_V2_CONTRACT_ADDRESS.substring(38)}` },
+            { label: 'Active contract', value: `${VEIL_V3_CONTRACT_ADDRESS.substring(0, 6)}…${VEIL_V3_CONTRACT_ADDRESS.substring(38)}` },
           ].map(({ label, value }) => (
             <div key={label} className="p-5 rounded-2xl bg-[#151512] border border-white/10 text-center">
               <span className="block text-xs uppercase tracking-wider text-[#A8A397] mb-2">{label}</span>
@@ -83,12 +82,12 @@ export default function VerifyPage() {
         {/* Contract link */}
         <div className="mt-6 text-center">
           <a
-            href={`${bnbChain.blockExplorers.default.url}address/${VEIL_V2_CONTRACT_ADDRESS}`}
+            href={`${bnbChain.blockExplorers.default.url}address/${VEIL_V3_CONTRACT_ADDRESS}`}
             target="_blank"
             rel="noreferrer"
             className="inline-block px-6 py-3 text-xs font-bold uppercase tracking-wider rounded-xl bg-white/[0.04] border border-white/10 text-[#A8A397] hover:text-[#F5F2E8] hover:bg-white/[0.08] transition-colors"
           >
-            View Contract on BohrScan →
+            View Active Contract on BscScan →
           </a>
         </div>
 

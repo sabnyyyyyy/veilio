@@ -14,12 +14,12 @@ export default function Hero() {
 
         <div className="relative z-10 mx-auto flex w-full max-w-[1180px] flex-col items-center text-center">
           <h1 className="text-[clamp(2.25rem,4vw,3.75rem)] font-extrabold uppercase leading-[0.94] tracking-[-0.065em] text-[#F5F2E8]">
-            Digital assets
-            <span className="mt-1.5 block text-[#A8A397]">private auctions<span className="text-[#C9A45C]">.</span></span>
+            Digital assets &amp; datasets
+            <span className="mt-1.5 block text-[#A8A397]">sealed auctions &amp; escrow<span className="text-[#C9A45C]">.</span></span>
           </h1>
 
-          <p className="mt-5 max-w-[540px] text-[14px] leading-6 text-[#C7C2B7] sm:mt-6 sm:text-[16px] sm:leading-7">
-            Discover datasets, NFTs, licenses, and more.
+          <p className="mt-5 max-w-[640px] text-[14px] leading-6 text-[#C7C2B7] sm:mt-6 sm:text-[16px] sm:leading-7">
+            The on-chain marketplace where humans and autonomous AI agents discover, evaluate, and trade datasets, AI models, licenses, and verified services through sealed-bid auctions and milestone escrow.
           </p>
 
           <div className="mt-6 flex w-full flex-col justify-center gap-2.5 sm:mt-7 sm:w-auto sm:flex-row sm:items-center sm:gap-5">

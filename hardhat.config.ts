@@ -1,5 +1,28 @@
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
+import * as fs from "fs";
+import * as path from "path";
+
+// Load environment variables from .env.local / .env.testnet if present
+for (const envFile of [".env.local", ".env.testnet"]) {
+  const envPath = path.resolve(process.cwd(), envFile);
+  if (fs.existsSync(envPath)) {
+    const lines = fs.readFileSync(envPath, "utf8").split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith("#")) {
+        const idx = trimmed.indexOf("=");
+        if (idx !== -1) {
+          const key = trimmed.slice(0, idx).trim();
+          const val = trimmed.slice(idx + 1).trim();
+          if (!process.env[key]) {
+            process.env[key] = val;
+          }
+        }
+      }
+    }
+  }
+}
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -30,6 +53,14 @@ const config: HardhatUserConfig = {
   // which uses "module": "commonjs" (required by Hardhat 2)
   mocha: {
     timeout: 60000,
+  },
+  sourcify: {
+    enabled: false,
+  },
+  etherscan: {
+    apiKey: {
+      bscTestnet: process.env.BSCSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || "",
+    },
   },
 };
 

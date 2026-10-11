@@ -47,3 +47,11 @@ export function datasetDownloadMessage(input: { auctionId: string; address: stri
 export function datasetPreviewMessage(input: { auctionId: string; address: string; timestamp: number }) {
   return [domain('publish preview'), 'Purpose: Make up to 10 dataset rows and column names public for this auction. This is an off-chain signature only; it does not submit a blockchain transaction.', `Auction ID: ${input.auctionId}`, `Seller: ${input.address.toLowerCase()}`, `Timestamp: ${input.timestamp}`].join('\n');
 }
+
+export function transactionChatMessage(input: { transactionId: string; address: string; timestamp: number }) {
+  return [domain('chat'), `Transaction ID: ${input.transactionId}`, `Wallet: ${input.address.toLowerCase()}`, `Timestamp: ${input.timestamp}`].join('\n');
+}
+
+export function transactionDisputeMessage(input: { auctionId: string; address: string; timestamp: number }) {
+  return [domain('dispute'), `Auction ID: ${input.auctionId}`, `Wallet: ${input.address.toLowerCase()}`, `Timestamp: ${input.timestamp}`].join('\n');
+}
