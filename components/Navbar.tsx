@@ -25,30 +25,31 @@ export default function Navbar() {
   };
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-white/5 bg-[#0A0A09]/80 backdrop-blur-xl transition-all duration-300">
-      <div className="max-w-7xl mx-auto px-6 h-[76px] flex items-center justify-between">
+    <header className="sticky top-0 z-50 w-full border-b border-white/[0.08] bg-[#0A0A09]/90 backdrop-blur-xl transition-all duration-300">
+      <div className="max-w-7xl mx-auto px-6 h-[72px] flex items-center justify-between">
         {/* Brand */}
-        <Link href={walletConnected ? '/dashboard' : '/'} className="flex items-center gap-3 sm:gap-3.5 group">
-          <Image 
-            src="/veilio-logo.png" 
-            alt="VEILIO Logo" 
-            width={40} 
-            height={40} 
-            className="w-[28px] h-[28px] sm:w-[38px] sm:h-[38px] rounded-sm object-cover" 
+        <Link href={walletConnected ? '/dashboard' : '/'} className="flex items-center gap-3 group">
+          <Image
+            src="/veilio-logo.png"
+            alt="VEILIO Logo"
+            width={36}
+            height={36}
+            className="w-[32px] h-[32px] sm:w-[36px] sm:h-[36px] rounded-sm object-cover"
           />
-          <span className="text-[20px] sm:text-[26px] font-bold tracking-tight text-[#F5F2E8] group-hover:text-white transition-colors uppercase">
+
+          <span className="text-[20px] sm:text-[22px] font-black tracking-tight text-[#F5F2E8] group-hover:text-white transition-colors uppercase">
             VEILIO
           </span>
         </Link>
 
         {/* Navigation Links - Hidden on landing page */}
         {pathname !== '/' && (
-          <nav className="hidden md:flex items-center gap-10 text-[11px] uppercase tracking-widest font-semibold">
+          <nav className="hidden md:flex items-center gap-6 lg:gap-8 text-[11px] sm:text-[12px] uppercase tracking-wider font-semibold">
             {walletConnected && (
               <Link
                 href="/dashboard"
-                className={`transition-colors ${
-                  isActive('/dashboard') ? 'text-[#C9A45C]' : 'text-[#A8A397] hover:text-[#F5F2E8]'
+                className={`transition-colors py-1 ${
+                  isActive('/dashboard') ? 'text-[#C9A45C]' : 'text-[#9E9A8E] hover:text-[#F5F2E8]'
                 }`}
               >
                 Dashboard
@@ -56,24 +57,38 @@ export default function Navbar() {
             )}
 
             {walletConnected && (
-              <Link href="/seller-analytics" className={`transition-colors ${isActive('/seller-analytics') ? 'text-[#C9A45C]' : 'text-[#A8A397] hover:text-[#F5F2E8]'}`}>
+              <Link
+                href="/seller-analytics"
+                className={`transition-colors py-1 ${
+                  isActive('/seller-analytics') ? 'text-[#C9A45C]' : 'text-[#9E9A8E] hover:text-[#F5F2E8]'
+                }`}
+              >
                 Seller Analytics
               </Link>
             )}
 
             <Link
               href="/auctions"
-              className={`transition-colors ${
-                isActive('/auctions') ? 'text-[#C9A45C]' : 'text-[#A8A397] hover:text-[#F5F2E8]'
+              className={`transition-colors py-1 ${
+                isActive('/auctions') ? 'text-[#C9A45C]' : 'text-[#9E9A8E] hover:text-[#F5F2E8]'
               }`}
             >
               Auctions
             </Link>
 
             <Link
+              href="/services"
+              className={`transition-colors py-1 ${
+                isActive('/services') ? 'text-[#C9A45C]' : 'text-[#9E9A8E] hover:text-[#F5F2E8]'
+              }`}
+            >
+              Services
+            </Link>
+
+            <Link
               href="/how-it-works"
-              className={`transition-colors ${
-                isActive('/how-it-works') ? 'text-[#C9A45C]' : 'text-[#A8A397] hover:text-[#F5F2E8]'
+              className={`transition-colors py-1 ${
+                isActive('/how-it-works') ? 'text-[#C9A45C]' : 'text-[#9E9A8E] hover:text-[#F5F2E8]'
               }`}
             >
               How It Works
@@ -81,8 +96,8 @@ export default function Navbar() {
 
             <Link
               href="/verify"
-              className={`transition-colors ${
-                isActive('/verify') ? 'text-[#C9A45C]' : 'text-[#A8A397] hover:text-[#F5F2E8]'
+              className={`transition-colors py-1 ${
+                isActive('/verify') ? 'text-[#C9A45C]' : 'text-[#9E9A8E] hover:text-[#F5F2E8]'
               }`}
             >
               Verify

@@ -1,6 +1,12 @@
-import { createPublicClient, http, parseAbi } from 'viem';
+import { createPublicClient, http, parseAbi, formatEther, type Hex } from 'viem';
 import { bnbChain } from '../chain';
 import { VEIL_V3_CONTRACT_ADDRESS } from '../contract';
+import {
+  VEILIO_SERVICES_CONTRACT_ADDRESS,
+  serviceEscrowAbi,
+  formatServiceOrderId,
+  SERVICE_ESCROW_STATES,
+} from './index';
 
 export const agentAuctionAbi = parseAbi([
   'function auctionCount() view returns (uint256)',
@@ -8,17 +14,39 @@ export const agentAuctionAbi = parseAbi([
   'function getAuctionState(uint256 auctionId) view returns (uint8)',
 ]);
 
+export { serviceEscrowAbi };
+
 export const agentPublicClient = createPublicClient({
   chain: bnbChain,
   transport: http(process.env.NEXT_PUBLIC_BNB_CHAIN_RPC || undefined),
 });
 
-const stateNames = ['Created', 'Bidding', 'Revealing', 'Inspection', 'RefundRequested', 'UnderReview', 'Completed', 'Refunded', 'Cancelled'] as const;
+const stateNames = [
+  'Created',
+  'Bidding',
+  'Revealing',
+  'Inspection',
+  'RefundRequested',
+  'UnderReview',
+  'Completed',
+  'Refunded',
+  'Cancelled',
+] as const;
 
 export async function readAgentAuction(id: bigint) {
   const [auction, currentState] = await Promise.all([
-    agentPublicClient.readContract({ address: VEIL_V3_CONTRACT_ADDRESS, abi: agentAuctionAbi, functionName: 'auctions', args: [id] }),
-    agentPublicClient.readContract({ address: VEIL_V3_CONTRACT_ADDRESS, abi: agentAuctionAbi, functionName: 'getAuctionState', args: [id] }),
+    agentPublicClient.readContract({
+      address: VEIL_V3_CONTRACT_ADDRESS,
+      abi: agentAuctionAbi,
+      functionName: 'auctions',
+      args: [id],
+    }),
+    agentPublicClient.readContract({
+      address: VEIL_V3_CONTRACT_ADDRESS,
+      abi: agentAuctionAbi,
+      functionName: 'getAuctionState',
+      args: [id],
+    }),
   ]);
   if (auction[0] === 0n) return null;
   return {
@@ -37,5 +65,40 @@ export async function readAgentAuction(id: bigint) {
     highestBidWei: auction[12].toString(),
     bidderCount: auction[13].toString(),
     revealedCount: auction[14].toString(),
+  };
+}
+
+export async function readAgentServiceOrder(orderId: Hex | string) {
+  if (
+    !VEILIO_SERVICES_CONTRACT_ADDRESS ||
+    VEILIO_SERVICES_CONTRACT_ADDRESS.length !== 42 ||
+    VEILIO_SERVICES_CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000'
+  ) {
+    throw new Error(
+      'NEXT_PUBLIC_SERVICE_ESCROW_CONTRACT_ADDRESS is missing or invalid. Please configure a valid deployed VeilServiceEscrow contract address.'
+    );
+  }
+
+  const id = formatServiceOrderId(orderId);
+  const raw = await agentPublicClient.readContract({
+    address: VEILIO_SERVICES_CONTRACT_ADDRESS,
+    abi: serviceEscrowAbi,
+    functionName: 'getOrder',
+    args: [id],
+  });
+
+  if (raw.status === 0 && raw.amount === 0n) return null;
+
+  return {
+    orderId: raw.orderId,
+    buyer: raw.buyer,
+    seller: raw.seller,
+    amountWei: raw.amount.toString(),
+    amountBnb: formatEther(raw.amount),
+    deadline: raw.deadline.toString(),
+    status: SERVICE_ESCROW_STATES[raw.status] ?? 'Unknown',
+    createdAt: raw.createdAt.toString(),
+    settledAt: raw.settledAt.toString(),
+    deliverableReference: raw.deliverableReference,
   };
 }

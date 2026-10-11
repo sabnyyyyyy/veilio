@@ -9,6 +9,7 @@ import {
   getDispute,
 } from '@/lib/server/transactionDb';
 import { validateTransactionContext, type TransactionValidationInput } from '@/lib/server/aiValidator';
+import { allowValidationRequest } from '@/lib/server/validationRateLimit';
 
 export async function POST(
   req: NextRequest,
@@ -23,7 +24,35 @@ export async function POST(
     }
 
     const body = await req.json().catch(() => ({}));
-    const { disputeFormOverride } = body;
+    const { disputeFormOverride, callerAddress } = body;
+
+    // 1. Resolve client identifier for rate limiting
+    const forwardedFor = req.headers.get('x-forwarded-for');
+    const realIp = req.headers.get('x-real-ip');
+    const clientIp = forwardedFor ? forwardedFor.split(',')[0].trim() : (realIp?.trim() || '127.0.0.1');
+
+    const rateLimitKey = callerAddress && typeof callerAddress === 'string'
+      ? `${clientIp}:${callerAddress.toLowerCase()}:${auctionId}`
+      : `${clientIp}:${auctionId}`;
+
+    // 2. Enforce rate limiting BEFORE any Viem contract calls or Gemini AI calls
+    const rateLimit = await allowValidationRequest(rateLimitKey);
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        {
+          error: 'Too many validation requests. Please wait before retrying.',
+          retryAfter: rateLimit.retryAfterSeconds,
+        },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(rateLimit.retryAfterSeconds),
+            'X-RateLimit-Limit': String(rateLimit.limit),
+            'X-RateLimit-Remaining': '0',
+          },
+        }
+      );
+    }
 
     // Fetch verified on-chain data
     const publicClient = createPublicClient({

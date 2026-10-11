@@ -40,7 +40,7 @@ export interface GeminiAdapterConfig {
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_MAX_RETRIES = 2;
-const DEFAULT_MODEL = 'gemini-2.5-flash';
+const DEFAULT_MODEL = 'gemini-3.8-flash';
 
 /**
  * Validates whether the Gemini server environment is configured.
@@ -51,9 +51,14 @@ export function isGeminiConfigured(): boolean {
 
 /**
  * Resolves the configured model identifier.
+ * Automatically upgrades deprecated gemini-2.5-flash to gemini-3.8-flash.
  */
 export function getGeminiModelName(): string {
-  return process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL;
+  const model = process.env.GEMINI_MODEL?.trim();
+  if (!model || model === 'gemini-2.5-flash') {
+    return DEFAULT_MODEL;
+  }
+  return model;
 }
 
 /**

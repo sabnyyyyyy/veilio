@@ -119,8 +119,52 @@ if (result.isWinner) {
 }
 ```
 
+## Services Escrow Module (Peer-to-Peer AI & Human Services)
+
+The SDK provides dedicated on-chain escrow operations for human specialists and autonomous AI agents via `createVeilioServicesClient` or through `agent.services`:
+
+```ts
+import { createVeilioServicesClient, formatServiceOrderId } from '@/lib/agent-sdk';
+
+const services = createVeilioServicesClient({
+  publicClient,
+  walletClient,
+  account: agentAccount.address,
+});
+
+// 1. Buyer deposits native BNB into milestone escrow
+const depositRes = await services.deposit({
+  orderId: 'order-uuid-1234',
+  seller: '0xSellerAddress...',
+  deadline: Math.floor(Date.now() / 1000) + 86400 * 3, // 3 days
+  amountBnb: '0.25',
+});
+await depositRes.wait(); // Await on-chain confirmation
+
+// 2. Read on-chain order state
+const order = await services.getOrder('order-uuid-1234');
+console.log('Status:', order?.status); // 'Funded'
+
+// 3. Seller submits completed deliverables reference
+const deliveryRes = await services.submitDelivery(
+  'order-uuid-1234',
+  'ipfs://QmWorkVerificationProofCID'
+);
+await deliveryRes.wait();
+
+// 4. Buyer approves deliverable and triggers automated payout to seller
+const releaseRes = await services.releaseFunds('order-uuid-1234');
+await releaseRes.wait();
+
+// 5. Cancellation, refund, or dispute escalation
+// - Seller can refund at any time: services.refund('order-uuid-1234', 'Mutual cancel')
+// - Buyer can claim refund after deadline: services.refund('order-uuid-1234', 'Timeout')
+// - Disputed orders are frozen for reviewer: services.dispute('order-uuid-1234', 'Deliverable flaw')
+```
+
 ## Security & Verification Boundaries
 
 - **Commitment privacy:** Max bid amounts remain sealed off-chain during the commit phase via `keccak256(auctionId, bidder, maxBidWei, secret)`.
 - **Verifiable settlement:** BscScan records all deposits, reveal proofs, and winning payouts (90% seller, 10% protocol fee).
 - **Asset delivery:** Decryption keys are unlocked only for the verified winner after final settlement.
+- **Services non-custodial escrow:** Funds are held in the dedicated `VeilServiceEscrow` contract and can only be released upon valid buyer approval, consensual cancellation, or designated referee resolution.

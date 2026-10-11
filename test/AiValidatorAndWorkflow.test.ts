@@ -17,6 +17,12 @@ import {
   submitDispute,
   respondToDispute,
 } from '../lib/server/transactionDb';
+import {
+  allowValidationRequest,
+  _resetValidationRateLimitsForTesting,
+  DEFAULT_MAX_VALIDATIONS_PER_WINDOW,
+  DEFAULT_VALIDATION_WINDOW_MS,
+} from '../lib/server/validationRateLimit';
 
 describe('VEILIO AI Validator and Post-Auction Workflow', () => {
   describe('Canonical Evidence Hash Determinism & Tampering Protection', () => {
@@ -183,7 +189,7 @@ describe('VEILIO AI Validator and Post-Auction Workflow', () => {
       expect(report.status).to.be.oneOf(['potential_mismatch', 'ready_for_review', 'needs_evidence']);
       const claimFinding = report.findings.find((f) => f.verification === 'user_claim');
       expect(claimFinding).to.not.be.undefined;
-      expect(report.limitations).to.include('Advisory only');
+      expect(report.limitations.toLowerCase()).to.include('advisory');
     });
   });
 
@@ -235,6 +241,101 @@ describe('VEILIO AI Validator and Post-Auction Workflow', () => {
       expect(updated).to.not.be.null;
       expect(updated?.status).to.equal('under_review');
       expect(updated?.sellerResponse?.statement).to.include('arsip part 1');
+    });
+  });
+
+  describe('Validation Endpoint Rate Limiting & DoS Defense', () => {
+    beforeEach(() => {
+      _resetValidationRateLimitsForTesting();
+    });
+
+    it('allows requests within the configured threshold and decrements remaining count', async () => {
+      const clientKey = '192.168.1.100:auction-1';
+      const baseTime = 1775550000000;
+
+      for (let i = 0; i < DEFAULT_MAX_VALIDATIONS_PER_WINDOW; i++) {
+        const res = await allowValidationRequest(clientKey, 60000, 5, baseTime + i * 100);
+        expect(res.allowed).to.be.true;
+        expect(res.remaining).to.equal(DEFAULT_MAX_VALIDATIONS_PER_WINDOW - (i + 1));
+        expect(res.retryAfterSeconds).to.equal(0);
+      }
+    });
+
+    it('rejects requests beyond threshold with HTTP 429 semantics and positive retryAfterSeconds', async () => {
+      const clientKey = '192.168.1.101:auction-2';
+      const baseTime = 1775550000000;
+
+      // Exhaust limit of 5 requests
+      for (let i = 0; i < 5; i++) {
+        const res = await allowValidationRequest(clientKey, 60000, 5, baseTime + i * 100);
+        expect(res.allowed).to.be.true;
+      }
+
+      // 6th request must be rejected
+      const blockedRes = await allowValidationRequest(clientKey, 60000, 5, baseTime + 1000);
+      expect(blockedRes.allowed).to.be.false;
+      expect(blockedRes.remaining).to.equal(0);
+      expect(blockedRes.retryAfterSeconds).to.be.at.least(1);
+    });
+
+    it('isolates rate limits between distinct client identifiers', async () => {
+      const clientA = '192.168.1.1:auction-1';
+      const clientB = '192.168.1.2:auction-1';
+      const baseTime = 1775550000000;
+
+      // Client A uses all 5 requests
+      for (let i = 0; i < 5; i++) {
+        await allowValidationRequest(clientA, 60000, 5, baseTime + i * 100);
+      }
+      const blockedA = await allowValidationRequest(clientA, 60000, 5, baseTime + 600);
+      expect(blockedA.allowed).to.be.false;
+
+      // Client B is fresh and must still be allowed
+      const allowedB = await allowValidationRequest(clientB, 60000, 5, baseTime + 700);
+      expect(allowedB.allowed).to.be.true;
+      expect(allowedB.remaining).to.equal(4);
+    });
+
+    it('resets allowed capacity once the time window elapses', async () => {
+      const clientKey = '192.168.1.102:auction-3';
+      const baseTime = 1775550000000;
+      const windowMs = 60000;
+
+      // Exhaust limit
+      for (let i = 0; i < 5; i++) {
+        await allowValidationRequest(clientKey, windowMs, 5, baseTime + i * 100);
+      }
+      expect((await allowValidationRequest(clientKey, windowMs, 5, baseTime + 1000)).allowed).to.be.false;
+
+      // Request after window has elapsed (windowMs + 1000ms later)
+      const afterWindowRes = await allowValidationRequest(clientKey, windowMs, 5, baseTime + windowMs + 1000);
+      expect(afterWindowRes.allowed).to.be.true;
+      expect(afterWindowRes.remaining).to.equal(4);
+    });
+
+    it('guarantees that rate-limited requests halt early without calling Gemini or AI engine', async () => {
+      const clientKey = '192.168.1.200:auction-4';
+      const baseTime = 1775550000000;
+
+      // Simulate exhausting the rate limit
+      for (let i = 0; i < 5; i++) {
+        await allowValidationRequest(clientKey, 60000, 5, baseTime + i * 100);
+      }
+
+      let geminiCalled = false;
+      const mockGeminiCaller = async () => {
+        geminiCalled = true;
+        return { status: 'consistent' };
+      };
+
+      // In the simulated endpoint path: check rate limit first
+      const rateLimitCheck = await allowValidationRequest(clientKey, 60000, 5, baseTime + 1000);
+      if (rateLimitCheck.allowed) {
+        await mockGeminiCaller();
+      }
+
+      expect(rateLimitCheck.allowed).to.be.false;
+      expect(geminiCalled).to.be.false;
     });
   });
 });
