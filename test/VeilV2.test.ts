@@ -61,6 +61,20 @@ describe("VeilV2 Phase 10 Verification Suite", function () {
   });
 
   // 1. Winner accepts dataset
+  it("credits the 5% non-reveal penalty to feeRecipient instead of stranding it", async function () {
+    await veil.connect(seller).createAuction("Item", "Desc", "uri", startingPrice, commitDuration, revealDuration, inspectionDuration);
+    const deposit = ethers.parseEther("2.0");
+    const commit1 = await veil.computeCommitment(1, buyer1.address, deposit, secret1);
+    await veil.connect(buyer1).commitBid(1, commit1, { value: deposit });
+    await time.increase(commitDuration + revealDuration + 2);
+    await veil.settleAuction(1);
+    expect(await veil.pendingRefunds(buyer1.address)).to.equal(ethers.parseEther("1.9"));
+    expect(await veil.pendingRefunds(feeRecipient.address)).to.equal(ethers.parseEther("0.1"));
+    await veil.connect(buyer1).withdrawRefund();
+    await veil.connect(feeRecipient).withdrawRefund();
+    expect(await ethers.provider.getBalance(await veil.getAddress())).to.equal(0);
+  });
+
   it("1. Winner accepts dataset", async function () {
     await setupAuctionToInspection();
     await expect(veil.connect(buyer1).acceptDataset(1))

@@ -5,8 +5,8 @@ import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 
 export const metadata: Metadata = {
-  title: 'VEILIO — Sealed-Bid Digital Auctions',
-  description: 'Bid without being influenced. Premium digital auction marketplace powered by cryptographic commitments on BNB Chain Testnet.',
+  title: 'VEILIO — Multichain Digital Asset Marketplace',
+  description: 'A digital asset marketplace with sealed-bid auctions, verifiable EVM and Solana wallet identity, and chain-aware activity.',
 };
 
 export default function RootLayout({

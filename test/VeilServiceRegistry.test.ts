@@ -32,6 +32,8 @@ describe('VEILIO On-Chain Seller Identity and Service Registry Test Suite', () =
     currency: 'BNB',
     deliveryTime: '24 Hours',
     sampleDeliverables: ['ipfs://QmSampleAuditReport01'],
+    // createdAt is a required, explicit hash input (no Date.now() default).
+    createdAt: 1775550000000,
   });
 
   const metadataHash1 = hashCanonicalMetadata(sampleMeta1);

@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import ServicesNav from '@/components/services/ServicesNav';
-import { useAccount } from 'wagmi';
+import { useAccount, useSignMessage } from 'wagmi';
 import {
   ShoppingBag,
   Clock,
@@ -15,9 +15,11 @@ import {
   FileText,
 } from 'lucide-react';
 import type { ServiceOrder } from '@/lib/server/servicesDb';
+import { createServiceAuthMessage, generateAuthNonce } from '@/lib/serviceAuth';
 
 export default function MyOrdersPage() {
   const { address, isConnected } = useAccount();
+  const { signMessageAsync } = useSignMessage();
 
   const [tab, setTab] = useState<'buyer' | 'seller'>('buyer');
   const [ordersBuyer, setOrdersBuyer] = useState<ServiceOrder[]>([]);
@@ -31,7 +33,22 @@ export default function MyOrdersPage() {
     }
     try {
       setLoading(true);
-      const res = await fetch(`/api/orders?userAddress=${address}`);
+      const timestamp = Date.now();
+      const nonce = generateAuthNonce();
+      const message = createServiceAuthMessage({
+        action: 'list-orders',
+        orderId: address.toLowerCase(),
+        address,
+        timestamp,
+        nonce,
+      });
+      const signature = await signMessageAsync({ message });
+      const res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ auth: { address, signature, timestamp, nonce } }),
+      });
       const data = await res.json();
       if (data.success) {
         setOrdersBuyer(data.asBuyer || []);

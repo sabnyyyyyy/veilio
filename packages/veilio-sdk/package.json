@@ -1,0 +1,82 @@
+{
+  "name": "veilioexchange",
+  "version": "0.3.0",
+  "description": "TypeScript SDK for VEILIO: sealed-bid auctions and milestone service escrow on BNB Smart Chain Testnet, Base Sepolia and Solana Devnet.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    },
+    "./solana": {
+      "import": {
+        "types": "./dist/esm/solana/index.d.ts",
+        "default": "./dist/esm/solana/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/solana/index.d.ts",
+        "default": "./dist/cjs/solana/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "build": "npm run clean && tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node scripts/write-cjs-package.mjs",
+    "test": "node scripts/smoke-test.mjs",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "keywords": [
+    "veilio",
+    "sealed-bid",
+    "auction",
+    "escrow",
+    "ai-agent",
+    "viem",
+    "bnb-chain",
+    "base",
+    "solana"
+  ],
+  "peerDependencies": {
+    "viem": "^2.21.0",
+    "@solana/web3.js": "^1.95.0"
+  },
+  "devDependencies": {
+    "@solana/web3.js": "^1.99.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.6.0",
+    "viem": "^2.56.3"
+  },
+  "typesVersions": {
+    "*": {
+      "solana": [
+        "./dist/esm/solana/index.d.ts"
+      ]
+    }
+  },
+  "peerDependenciesMeta": {
+    "@solana/web3.js": {
+      "optional": true
+    }
+  }
+}

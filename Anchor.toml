@@ -1,0 +1,26 @@
+[toolchain]
+anchor_version = "0.30.1"
+solana_version = "1.18.17"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.devnet]
+veilio_auction = "5Tw1iJGN1hhyRzepbD5eLoaRoZTEiKcqrh2HoZYhYEta"
+veilio_service_registry = "6CMoJyQmBobLTk4M9ZoygMShRB6A6i77e6viq2Lew2KY"
+veilio_service_escrow = "5Vj4y8BT74PDe5VwLuDp9agTR5ak4vtZdwxnBfRW3R8s"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "Devnet"
+wallet = "~/.config/solana/id.json"
+
+[workspace]
+members = [
+  "programs/veilio-auction",
+  "programs/veilio-service-registry",
+  "programs/veilio-service-escrow"
+]

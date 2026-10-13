@@ -51,6 +51,7 @@ export interface AuctionItem {
   highestBidder?: string;
   winningPrice?: string;
   contractAddress?: string;
+  networkId?: 'bnb:97' | 'base:84532' | 'solana:devnet';
   txHash?: string;
 }
 

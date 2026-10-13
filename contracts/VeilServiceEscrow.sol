@@ -40,6 +40,19 @@ abstract contract ReentrancyGuard {
  *    - Fee basis points capped at `MAX_FEE_BPS = 500` (5%).
  *    - Applied only to seller payouts in `releaseFunds` and `resolveDispute`.
  *    - Refunds are 100% fee-free for the buyer.
+ *    - The fee rate is snapshotted per order at deposit (`orderFeeBps`); later `setFeeConfig` changes
+ *      only affect new orders. The fee *recipient* is read at payout time (treasury rotation).
+ * 7. Dispute Timeout:
+ *    - `dispute` records `disputedAt`. If the reviewer has not resolved within `DISPUTE_TIMEOUT`
+ *      (7 days), anyone may call `resolveDisputeTimeout`, which refunds 100% to the buyer fee-free
+ *      (funds return to their origin, same default as the auction reviewer timeout).
+ * 8. Order IDs:
+ *    - `orderId` is a single global namespace (first depositor wins). A third party who learns an
+ *      orderId before it is funded can front-run `deposit` with the same id so the real buyer's
+ *      deposit reverts ("Order already exists in escrow"). No funds are at risk, but the off-chain
+ *      order must then be re-funded under a fresh id. Clients should use unpredictable orderIds
+ *      (e.g. random UUID / hash with salt) and verify `orders(orderId).buyer` after funding.
+ *      Kept global (not buyer-namespaced) to stay ABI/storage-compatible with existing clients.
  * 6. Access Control:
  *    - `owner`: Can update fee recipient, fee basis points (within cap), and reviewer.
  *    - `reviewer`: Third-party arbitrator who splits funds between buyer and seller in `resolveDispute`.
@@ -75,6 +88,12 @@ contract VeilServiceEscrow is ReentrancyGuard {
 
     mapping(bytes32 => EscrowOrder) public orders;
     mapping(address => uint256) public pendingWithdrawals;
+
+    uint256 public constant DISPUTE_TIMEOUT = 7 days;
+    /// @notice Platform fee (bps) locked in for each order at deposit time.
+    mapping(bytes32 => uint256) public orderFeeBps;
+    /// @notice Timestamp at which an order entered Disputed.
+    mapping(bytes32 => uint256) public disputedAt;
 
     event OrderFunded(
         bytes32 indexed orderId,
@@ -115,6 +134,7 @@ contract VeilServiceEscrow is ReentrancyGuard {
     event WithdrawalClaimed(address indexed recipient, uint256 amount);
     event FeeConfigUpdated(address feeRecipient, uint256 feeBps);
     event ReviewerUpdated(address newReviewer);
+    event DisputeTimedOut(bytes32 indexed orderId, address indexed buyer, uint256 refundAmount);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner");
@@ -194,6 +214,7 @@ contract VeilServiceEscrow is ReentrancyGuard {
             settledAt: 0,
             deliverableReference: ""
         });
+        orderFeeBps[orderId] = platformFeeBasisPoints;
 
         emit OrderFunded(orderId, msg.sender, seller, msg.value, deadline);
     }
@@ -231,7 +252,7 @@ contract VeilServiceEscrow is ReentrancyGuard {
         uint256 totalAmount = order.amount;
         require(totalAmount > 0, "Order amount is zero");
 
-        uint256 fee = (totalAmount * platformFeeBasisPoints) / 10000;
+        uint256 fee = (totalAmount * orderFeeBps[orderId]) / 10000;
         uint256 sellerAmount = totalAmount - fee;
 
         order.amount = 0;
@@ -303,8 +324,31 @@ contract VeilServiceEscrow is ReentrancyGuard {
         require(msg.sender == order.buyer || msg.sender == order.seller, "Only buyer or seller can dispute");
 
         order.status = EscrowStatus.Disputed;
+        disputedAt[orderId] = block.timestamp;
 
         emit OrderDisputed(orderId, msg.sender, reason);
+    }
+
+    /**
+     * @notice Liveness fallback when the reviewer does not resolve a dispute within DISPUTE_TIMEOUT.
+     *         Callable by anyone; refunds 100% of the escrow to the buyer, fee-free.
+     */
+    function resolveDisputeTimeout(bytes32 orderId) external nonReentrant {
+        EscrowOrder storage order = orders[orderId];
+        require(order.status == EscrowStatus.Disputed, "Order is not in disputed state");
+        require(block.timestamp >= disputedAt[orderId] + DISPUTE_TIMEOUT, "Dispute review period still active");
+
+        uint256 refundAmount = order.amount;
+        require(refundAmount > 0, "Order amount is zero");
+
+        order.amount = 0;
+        order.status = EscrowStatus.Refunded;
+        order.settledAt = block.timestamp;
+
+        _safeTransferOrStore(order.buyer, refundAmount);
+
+        emit DisputeResolved(orderId, refundAmount, 0);
+        emit DisputeTimedOut(orderId, order.buyer, refundAmount);
     }
 
     /**
@@ -328,7 +372,7 @@ contract VeilServiceEscrow is ReentrancyGuard {
         order.settledAt = block.timestamp;
 
         // Platform fee applies to the seller payout share
-        uint256 fee = (sellerShare * platformFeeBasisPoints) / 10000;
+        uint256 fee = (sellerShare * orderFeeBps[orderId]) / 10000;
         uint256 netSellerShare = sellerShare - fee;
 
         if (fee > 0 && feeRecipient != address(0)) {
@@ -350,6 +394,7 @@ contract VeilServiceEscrow is ReentrancyGuard {
         return orders[orderId];
     }
 
+    /// @notice Updates the fee recipient and the fee rate for orders deposited from now on.
     function setFeeConfig(address payable _feeRecipient, uint256 _feeBps) external onlyOwner {
         require(_feeBps <= MAX_FEE_BPS, "Fee exceeds max");
         require(_feeRecipient != address(0), "Invalid fee recipient");

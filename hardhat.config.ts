@@ -3,6 +3,8 @@ import "@nomicfoundation/hardhat-toolbox";
 import * as fs from "fs";
 import * as path from "path";
 
+process.env.HARDHAT_RUNNING = "true";
+
 // Load environment variables from .env.local / .env.testnet if present
 for (const envFile of [".env.local", ".env.testnet"]) {
   const envPath = path.resolve(process.cwd(), envFile);
@@ -42,6 +44,11 @@ const config: HardhatUserConfig = {
       chainId: 97,
       accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
     },
+    baseSepolia: {
+      url: process.env.BASE_SEPOLIA_RPC || process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC || "https://sepolia.base.org",
+      chainId: 84532,
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+    },
   },
   paths: {
     sources: "./contracts",
@@ -60,6 +67,7 @@ const config: HardhatUserConfig = {
   etherscan: {
     apiKey: {
       bscTestnet: process.env.BSCSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || "",
+      baseSepolia: process.env.BASESCAN_API_KEY || process.env.ETHERSCAN_API_KEY || "",
     },
   },
 };

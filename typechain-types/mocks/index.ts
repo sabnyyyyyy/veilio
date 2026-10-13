@@ -3,3 +3,4 @@
 /* eslint-disable */
 import type * as mockNfTsSol from "./MockNFTs.sol";
 export type { mockNfTsSol };
+export type { NftGriefer } from "./NftGriefer";

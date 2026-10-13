@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createPublicClient, http, isAddress } from 'viem';
-import { bnbChain } from '@/lib/chain';
-import { VEIL_V3_CONTRACT_ADDRESS, VEIL_V3_ABI } from '@/lib/contract';
+import { isValidAuctionIdForNetwork, parseAuctionNetwork, scopedAuctionKey } from '@/lib/auctionNetwork';
+import { readOnchainAuction } from '@/lib/server/auctionChainState';
 import { getOrCreateTransaction, getDispute } from '@/lib/server/transactionDb';
 import { getDatasetRecordByAuctionId } from '@/lib/server/datasetDb';
 
@@ -13,56 +12,56 @@ export async function GET(
     const { id } = await params;
     const auctionId = String(id);
 
-    if (!/^[1-9]\d{0,77}$/.test(auctionId)) {
+    const networkId = parseAuctionNetwork(req.nextUrl.searchParams.get('network'));
+    if (!networkId) {
+      return NextResponse.json({ error: 'Unsupported auction network' }, { status: 400 });
+    }
+    if (!isValidAuctionIdForNetwork(auctionId, networkId)) {
       return NextResponse.json({ error: 'Invalid auction/transaction ID' }, { status: 400 });
     }
 
-    // Verify on-chain state
-    const publicClient = createPublicClient({
-      chain: bnbChain,
-      transport: http(process.env.NEXT_PUBLIC_BNB_CHAIN_RPC || undefined),
-    });
-
-    const raw = (await publicClient.readContract({
-      address: VEIL_V3_CONTRACT_ADDRESS,
-      abi: VEIL_V3_ABI,
-      functionName: 'auctions',
-      args: [BigInt(auctionId)],
-    })) as readonly unknown[];
-
-    if (!raw || Number(raw[0]) === 0) {
+    // Verify on-chain state on the auction's own network
+    const auction = await readOnchainAuction(networkId, auctionId);
+    if (!auction) {
       return NextResponse.json({ error: 'Auction not found on chain' }, { status: 404 });
     }
 
-    const seller = String(raw[1]);
-    const itemName = String(raw[2]);
-    const description = String(raw[3]);
-    const imageURI = String(raw[4]);
-    const startingPrice = String(raw[5]);
-    const inspectionDuration = Number(raw[8]);
-    const inspectionEndTime = Number(raw[9]);
-    const stateNumber = Number(raw[10]);
-    const highestBidder = String(raw[11]);
-    const highestBid = String(raw[12]);
+    const seller = auction.seller;
+    const itemName = auction.itemName;
+    const description = auction.description;
+    const imageURI = auction.imageURI;
+    const startingPrice = auction.startingPrice;
+    const inspectionDuration = auction.inspectionDuration;
+    const inspectionEndTime = auction.inspectionEndTime;
+    const stateNumber = auction.state;
+    const highestBidder = auction.highestBidder;
+    const highestBid = auction.highestBid;
 
-    const datasetRecord = await getDatasetRecordByAuctionId(auctionId);
+    const datasetRecord = await getDatasetRecordByAuctionId(auctionId, networkId);
 
-    const transaction = getOrCreateTransaction(auctionId, {
+    const transaction = getOrCreateTransaction(scopedAuctionKey(networkId, auctionId), {
       buyerAddress: highestBidder,
       sellerAddress: seller,
       assetType: datasetRecord?.assetType || 'dataset',
-      paymentStatus: stateNumber >= 6 ? 'settled' : 'escrowed',
-      deliveryStatus: datasetRecord ? 'delivery_submitted' : 'pending_delivery',
+      paymentStatus: stateNumber === 6
+        ? 'settled'
+        : stateNumber === 7 || stateNumber === 8
+          ? 'refunded'
+          : stateNumber >= 1 && stateNumber <= 5
+            ? 'escrowed'
+            : 'pending',
+      deliveryStatus: datasetRecord && stateNumber >= 3 && stateNumber <= 7 ? 'delivery_submitted' : 'pending_delivery',
       inspectionDeadline: inspectionEndTime,
     });
 
-    const dispute = getDispute(auctionId);
+    const dispute = getDispute(auctionId, networkId);
 
     return NextResponse.json({
       success: true,
       transaction,
       dispute,
       onchainState: {
+        networkId,
         auctionId,
         seller,
         itemName,

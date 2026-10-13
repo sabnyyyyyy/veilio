@@ -6,10 +6,17 @@ import { Search, SlidersHorizontal, Bot, ArrowUpDown, X } from 'lucide-react';
 
 import AuctionGrid from '@/components/AuctionGrid';
 import { fetchOnchainAuctions } from '@/lib/onchainAuctions';
+import { fetchSolanaOnchainAuctions } from '@/lib/solanaAuctions';
 import { MOCK_AUCTIONS, type AuctionItem } from '@/lib/mockAuctions';
 
+export type AuctionNetworkKey = 'bnb:97' | 'base:84532' | 'solana:devnet';
+
 export default function AuctionsPage() {
-  const publicClient = usePublicClient();
+  const [selectedNetwork, setSelectedNetwork] = useState<AuctionNetworkKey>('bnb:97');
+  const isSolana = selectedNetwork === 'solana:devnet';
+  const isBase = selectedNetwork === 'base:84532';
+  const selectedChainId = isBase ? 84532 : 97;
+  const publicClient = usePublicClient({ chainId: selectedChainId });
 
   const [auctions, setAuctions] = useState<AuctionItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -31,50 +38,81 @@ export default function AuctionsPage() {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   useEffect(() => {
-    if (!publicClient) {
-      // Offline / Wallet not connected fallback to mock auctions with rich taxonomy
-      setAuctions(MOCK_AUCTIONS);
-      setTotalAuctions(String(MOCK_AUCTIONS.length));
-      setIsLoading(false);
-      return;
-    }
-
-    const client = publicClient;
-
     async function loadAuctions() {
-      try {
-        setIsLoading(true);
-        setError(null);
+      setIsLoading(true);
+      setError(null);
 
-        const page = await fetchOnchainAuctions(client, { limit: 20 });
+      if (isSolana) {
+        try {
+          const page = await fetchSolanaOnchainAuctions();
+          setAuctions(page.auctions);
+          setNextCursor(null);
+          setTotalAuctions(page.total);
+        } catch (err: any) {
+          console.error('Failed to load Solana on-chain auctions:', err);
+          setAuctions([]);
+          setNextCursor(null);
+          setTotalAuctions('0');
+          setError(
+            err?.message ||
+              'Failed to load auctions from Solana Devnet. Verify RPC connectivity.'
+          );
+        } finally {
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      if (!publicClient) {
+        // Offline / Wallet not connected fallback to mock auctions with rich taxonomy
+        setAuctions(MOCK_AUCTIONS);
+        setTotalAuctions(String(MOCK_AUCTIONS.length));
+        setIsLoading(false);
+        return;
+      }
+
+      const client = publicClient;
+
+      try {
+        const page = await fetchOnchainAuctions(client, { limit: 20, chainId: selectedChainId });
         if (page.auctions.length > 0) {
           setAuctions(page.auctions);
           setNextCursor(page.nextCursor);
           setTotalAuctions(page.total);
-        } else {
-          // Fallback to sample digital-asset mock auctions so visitors see active categories
+        } else if (selectedChainId === 97) {
+          // Fallback to sample digital-asset mock auctions so visitors see active categories on BNB
           setAuctions(MOCK_AUCTIONS);
           setTotalAuctions(String(MOCK_AUCTIONS.length));
+        } else {
+          setAuctions([]);
+          setNextCursor(null);
+          setTotalAuctions('0');
         }
       } catch (err) {
         console.error('Failed to load on-chain auctions:', err);
-        // Fallback to local catalog
-        setAuctions(MOCK_AUCTIONS);
-        setTotalAuctions(String(MOCK_AUCTIONS.length));
+        if (selectedChainId === 97) {
+          setAuctions(MOCK_AUCTIONS);
+          setTotalAuctions(String(MOCK_AUCTIONS.length));
+        } else {
+          setAuctions([]);
+          setNextCursor(null);
+          setTotalAuctions('0');
+          setError('Failed to load auctions from Base Sepolia. Verify RPC and contract deployment.');
+        }
       } finally {
         setIsLoading(false);
       }
     }
 
     loadAuctions();
-  }, [publicClient]);
+  }, [publicClient, selectedNetwork, selectedChainId, isSolana]);
 
   async function loadMore() {
     if (!publicClient || !nextCursor || isLoadingMore) return;
     setIsLoadingMore(true);
     setPaginationError(null);
     try {
-      const page = await fetchOnchainAuctions(publicClient, { cursor: nextCursor, limit: 20 });
+      const page = await fetchOnchainAuctions(publicClient, { cursor: nextCursor, limit: 20, chainId: selectedChainId });
       setAuctions((current) => [...current, ...page.auctions]);
       setNextCursor(page.nextCursor);
     } catch (err) {
@@ -190,7 +228,7 @@ export default function AuctionsPage() {
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[#C9A45C]/20 bg-[#C9A45C]/5 text-[10px] font-bold uppercase tracking-widest text-[#C9A45C] mb-3">
               <span className="w-1.5 h-1.5 rounded-full bg-[#C9A45C] animate-pulse" />
-              BNB Chain · Sealed-Bid Marketplace
+              {isSolana ? 'Solana Devnet' : isBase ? 'Base Sepolia' : 'BNB Chain'} · Sealed-Bid Marketplace
             </div>
             <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-[#F5F2E8] uppercase">
               Digital Asset Auctions
@@ -201,6 +239,22 @@ export default function AuctionsPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <label className="sr-only" htmlFor="auction-network">Auction network</label>
+            <select
+              id="auction-network"
+              value={selectedNetwork}
+              onChange={(event) => {
+                const val = event.target.value as AuctionNetworkKey;
+                setSelectedNetwork(val);
+                setNextCursor(null);
+                setAuctions([]);
+              }}
+              className="rounded-xl border border-white/10 bg-[#151512] px-3.5 py-2 text-xs font-semibold text-[#F5F2E8] outline-none focus:border-[#C9A45C]"
+            >
+              <option value="bnb:97">BNB Chain Testnet</option>
+              <option value="base:84532">Base Sepolia</option>
+              <option value="solana:devnet">Solana Devnet</option>
+            </select>
             <button
               onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
               className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-semibold transition ${
@@ -222,7 +276,7 @@ export default function AuctionsPage() {
       {isLoading && (
         <div className="max-w-7xl mx-auto px-6 py-20 text-center">
           <p className="text-[#A8A397] font-mono text-xs uppercase tracking-widest">
-            Loading auctions from BNB Chain...
+            Loading auctions from {isSolana ? 'Solana Devnet' : isBase ? 'Base Sepolia' : 'BNB Chain'}...
           </p>
         </div>
       )}
@@ -322,7 +376,7 @@ export default function AuctionsPage() {
               {/* Price Min/Max */}
               <div className="sm:col-span-2 grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[10px] uppercase tracking-widest text-[#A8A397] mb-1.5">Min Price (BNB)</label>
+                  <label className="block text-[10px] uppercase tracking-widest text-[#A8A397] mb-1.5">Min Price ({isSolana ? 'SOL' : isBase ? 'ETH' : 'BNB'})</label>
                   <input
                     type="number"
                     min="0"
@@ -334,7 +388,7 @@ export default function AuctionsPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] uppercase tracking-widest text-[#A8A397] mb-1.5">Max Price (BNB)</label>
+                  <label className="block text-[10px] uppercase tracking-widest text-[#A8A397] mb-1.5">Max Price ({isSolana ? 'SOL' : isBase ? 'ETH' : 'BNB'})</label>
                   <input
                     type="number"
                     min="0"

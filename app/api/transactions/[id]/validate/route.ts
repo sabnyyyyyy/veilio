@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createPublicClient, http, isAddress } from 'viem';
-import { bnbChain } from '@/lib/chain';
-import { VEIL_V3_CONTRACT_ADDRESS, VEIL_V3_ABI } from '@/lib/contract';
 import { getDatasetRecordByAuctionId } from '@/lib/server/datasetDb';
+import { isValidAuctionIdForNetwork, parseAuctionNetwork, scopedAuctionKey } from '@/lib/auctionNetwork';
+import { readOnchainAuction } from '@/lib/server/auctionChainState';
 import {
-  getOrCreateTransaction,
   getTransactionMessages,
   getDispute,
 } from '@/lib/server/transactionDb';
@@ -19,24 +17,25 @@ export async function POST(
     const { id } = await params;
     const auctionId = String(id);
 
-    if (!/^[1-9]\d{0,77}$/.test(auctionId)) {
+    const networkId = parseAuctionNetwork(req.nextUrl.searchParams.get('network'));
+    if (!networkId) {
+      return NextResponse.json({ error: 'Unsupported auction network' }, { status: 400 });
+    }
+    if (!isValidAuctionIdForNetwork(auctionId, networkId)) {
       return NextResponse.json({ error: 'Invalid transaction ID' }, { status: 400 });
     }
+    const transactionKey = scopedAuctionKey(networkId, auctionId);
 
-    const body = await req.json().catch(() => ({}));
-    const { disputeFormOverride, callerAddress } = body;
-
-    // 1. Resolve client identifier for rate limiting
+    // Rate-limit before parsing the request body or making RPC/Gemini calls.
     const forwardedFor = req.headers.get('x-forwarded-for');
     const realIp = req.headers.get('x-real-ip');
     const clientIp = forwardedFor ? forwardedFor.split(',')[0].trim() : (realIp?.trim() || '127.0.0.1');
-
-    const rateLimitKey = callerAddress && typeof callerAddress === 'string'
-      ? `${clientIp}:${callerAddress.toLowerCase()}:${auctionId}`
-      : `${clientIp}:${auctionId}`;
-
-    // 2. Enforce rate limiting BEFORE any Viem contract calls or Gemini AI calls
-    const rateLimit = await allowValidationRequest(rateLimitKey);
+    let rateLimit;
+    try {
+      rateLimit = await allowValidationRequest(`${clientIp}:${transactionKey}`);
+    } catch {
+      return NextResponse.json({ error: 'Validation is temporarily unavailable. Please try again shortly.' }, { status: 503 });
+    }
     if (!rateLimit.allowed) {
       return NextResponse.json(
         {
@@ -54,30 +53,48 @@ export async function POST(
       );
     }
 
-    // Fetch verified on-chain data
-    const publicClient = createPublicClient({
-      chain: bnbChain,
-      transport: http(process.env.NEXT_PUBLIC_BNB_CHAIN_RPC || undefined),
-    });
+    const contentLength = Number(req.headers.get('content-length') || 0);
+    if (contentLength > 64 * 1024) {
+      return NextResponse.json({ error: 'Request body must be 64 KB or smaller.' }, { status: 413 });
+    }
 
-    const raw = (await publicClient.readContract({
-      address: VEIL_V3_CONTRACT_ADDRESS,
-      abi: VEIL_V3_ABI,
-      functionName: 'auctions',
-      args: [BigInt(auctionId)],
-    })) as readonly unknown[];
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Invalid JSON request body' }, { status: 400 });
+    }
+    const { disputeFormOverride } = body as { disputeFormOverride?: unknown };
+    let safeDisputeForm: TransactionValidationInput['disputeForm'];
+    if (disputeFormOverride !== undefined) {
+      if (!disputeFormOverride || typeof disputeFormOverride !== 'object' || Array.isArray(disputeFormOverride)) {
+        return NextResponse.json({ error: 'Invalid dispute form' }, { status: 400 });
+      }
+      const form = disputeFormOverride as Record<string, unknown>;
+      const textField = (value: unknown, max: number) => typeof value === 'string' ? value.slice(0, max) : undefined;
+      safeDisputeForm = {
+        issueCategory: textField(form.issueCategory, 100),
+        expectedCondition: textField(form.expectedCondition, 1000),
+        actualCondition: textField(form.actualCondition, 1000),
+        description: textField(form.description, 4000),
+        requestedResolution: textField(form.requestedResolution, 1000),
+        evidenceReferences: Array.isArray(form.evidenceReferences)
+          ? form.evidenceReferences.filter((value): value is string => typeof value === 'string').slice(0, 20).map((value) => value.slice(0, 500))
+          : [],
+      };
+    }
 
-    if (!raw || Number(raw[0]) === 0) {
+    // Fetch verified on-chain data from the auction's own network
+    const auction = await readOnchainAuction(networkId, auctionId);
+    if (!auction) {
       return NextResponse.json({ error: 'Auction not found on chain' }, { status: 404 });
     }
 
-    const seller = String(raw[1]);
-    const itemName = String(raw[2]);
-    const description = String(raw[3]);
-    const inspectionEndTime = Number(raw[9]);
-    const stateNumber = Number(raw[10]);
-    const highestBidder = String(raw[11]);
-    const highestBid = String(raw[12]);
+    const seller = auction.seller;
+    const itemName = auction.itemName;
+    const description = auction.description;
+    const inspectionEndTime = auction.inspectionEndTime;
+    const stateNumber = auction.state;
+    const highestBidder = auction.highestBidder;
+    const highestBid = auction.highestBid;
 
     const stateNames = [
       'Created',
@@ -91,12 +108,12 @@ export async function POST(
       'Cancelled',
     ];
 
-    const datasetRecord = await getDatasetRecordByAuctionId(auctionId);
-    const existingDispute = getDispute(auctionId);
-    const messages = getTransactionMessages(auctionId);
+    const datasetRecord = await getDatasetRecordByAuctionId(auctionId, networkId);
+    const existingDispute = getDispute(auctionId, networkId);
+    const messages = getTransactionMessages(transactionKey);
 
     const validationInput: TransactionValidationInput = {
-      transactionId: auctionId,
+      transactionId: transactionKey,
       auctionId,
       buyerAddress: highestBidder,
       sellerAddress: seller,
@@ -118,7 +135,7 @@ export async function POST(
         expectedRecordCount: datasetRecord?.manifest?.recordCount,
         expectedColumnCount: datasetRecord?.manifest?.columnCount,
       },
-      delivery: datasetRecord
+      delivery: datasetRecord && stateNumber >= 3 && stateNumber <= 7
         ? {
             deliveryStatus: 'delivery_submitted',
             assetType: datasetRecord.assetType,
@@ -129,7 +146,7 @@ export async function POST(
             accessInstructionsAvailable: true,
           }
         : undefined,
-      disputeForm: disputeFormOverride || (existingDispute
+      disputeForm: safeDisputeForm || (existingDispute
         ? {
             issueCategory: existingDispute.issueCategory,
             expectedCondition: existingDispute.expectedCondition,

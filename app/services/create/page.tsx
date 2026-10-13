@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import {
   VEIL_SERVICE_REGISTRY_ABI,
-  VEIL_SERVICE_REGISTRY_CONTRACT_ADDRESS,
+  getServiceRegistryAddress,
 } from '@/lib/serviceContract';
 import {
   buildCanonicalMetadata,
@@ -63,7 +63,13 @@ export default function CreateServicePage() {
   const [createdServiceId, setCreatedServiceId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const isWrongChain = isConnected && chainId !== 97;
+  // Listings can be registered on BNB Chain Testnet (97) or Base Sepolia (84532).
+  const isWrongChain = isConnected && chainId !== 97 && chainId !== 84532;
+  const listingChainId = chainId === 84532 ? 84532 : 97;
+  const listingNetwork = listingChainId === 84532 ? 'base:84532' : 'bnb:97';
+  const listingCurrency = listingChainId === 84532 ? 'ETH' : 'BNB';
+  const listingNetworkName = listingChainId === 84532 ? 'Base Sepolia' : 'BNB Chain Testnet';
+  const listingExplorer = listingChainId === 84532 ? 'https://sepolia.basescan.org' : 'https://testnet.bscscan.com';
 
   const addDeliverableField = () => {
     setSampleDeliverables([...sampleDeliverables, '']);
@@ -89,7 +95,7 @@ export default function CreateServicePage() {
     }
 
     if (isWrongChain) {
-      setErrorMessage('Please switch your wallet network to BNB Chain Testnet (Chain ID 97) before registering.');
+      setErrorMessage('Please switch your wallet network to BNB Chain Testnet (97) or Base Sepolia (84532) before registering.');
       return;
     }
 
@@ -104,7 +110,7 @@ export default function CreateServicePage() {
     }
 
     if (!price || isNaN(Number(price)) || Number(price) <= 0) {
-      setErrorMessage('Please provide a valid positive price in BNB.');
+      setErrorMessage(`Please provide a valid positive price in ${listingCurrency}.`);
       return;
     }
 
@@ -113,6 +119,10 @@ export default function CreateServicePage() {
       setErrorMessage(null);
 
       const generatedId = `srv-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      // createdAt is hashed into the on-chain metadata hash and sent to the API, which
+      // stores it verbatim so every later verification recomputes the same hash.
+      const createdAt = Date.now();
+      const resolvedSellerName = sellerName.trim() || (sellerType === 'agent' ? 'Autonomous AI Agent' : 'Verified Specialist');
       const filteredDeliverables = sampleDeliverables.map((s) => s.trim()).filter((s) => s.length > 0);
 
       // 1. Build canonical metadata and compute SHA-256 hash
@@ -120,14 +130,15 @@ export default function CreateServicePage() {
         id: generatedId,
         seller: address,
         sellerType,
-        sellerName: sellerName.trim() || (sellerType === 'agent' ? 'Autonomous AI Agent' : 'Verified Specialist'),
+        sellerName: resolvedSellerName,
         title: title.trim(),
         description: description.trim(),
         category,
         price: String(Number(price)),
-        currency: 'BNB',
+        currency: listingCurrency,
         deliveryTime: deliveryTime.trim(),
         sampleDeliverables: filteredDeliverables,
+        createdAt,
       });
 
       const metadataHash = hashCanonicalMetadata(canonicalMeta);
@@ -151,7 +162,7 @@ export default function CreateServicePage() {
       const serviceIdBytes32 = formatServiceRegistryId(generatedId);
 
       const onChainTxHash = await writeContractAsync({
-        address: VEIL_SERVICE_REGISTRY_CONTRACT_ADDRESS,
+        address: getServiceRegistryAddress(listingChainId),
         abi: VEIL_SERVICE_REGISTRY_ABI,
         functionName: 'registerService',
         args: [serviceIdBytes32, metadataHash, metadataURI],
@@ -177,12 +188,14 @@ export default function CreateServicePage() {
           id: generatedId,
           sellerId: address,
           sellerType,
-          sellerName: sellerName.trim() || (sellerType === 'agent' ? 'Autonomous AI Agent' : 'Verified Specialist'),
+          sellerName: resolvedSellerName,
           title: title.trim(),
           description: description.trim(),
           category,
           price: String(Number(price)),
-          currency: 'BNB',
+          currency: listingCurrency,
+          network: listingNetwork,
+          createdAt,
           deliveryTime: deliveryTime.trim(),
           sampleDeliverables: filteredDeliverables,
           txHash: onChainTxHash,
@@ -235,7 +248,7 @@ export default function CreateServicePage() {
             <div className="flex items-center gap-2.5 text-xs">
               <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
               <span>
-                Your wallet is connected to Chain ID {chainId}. Please switch to <strong>BNB Chain Testnet (Chain ID 97)</strong> to register services.
+                Your wallet is connected to Chain ID {chainId}. Please switch to <strong>BNB Chain Testnet (97)</strong> or <strong>Base Sepolia (84532)</strong> to register services.
               </span>
             </div>
             <button
@@ -277,7 +290,7 @@ export default function CreateServicePage() {
             <p className="text-[11px] text-[#A8A397]">
               {txStage === 'awaiting_signature' && 'Sign the cryptographic message in your wallet to authorize this listing without spending gas.'}
               {txStage === 'awaiting_wallet' && 'Confirm the registerService transaction in MetaMask or Rabby to anchor your listing ID and metadata hash on-chain.'}
-              {txStage === 'mining' && 'Transaction submitted to BNB Chain Testnet. Waiting for block inclusion...'}
+              {txStage === 'mining' && `Transaction submitted to ${listingNetworkName}. Waiting for block inclusion...`}
               {txStage === 'verifying' && 'Validating the ServiceRegistered event logs and synchronizing off-chain registry...'}
               {txStage === 'confirmed' && 'Your service is now verifiable on-chain by buyers and VEILIO AI agents.'}
               {txStage === 'failed' && (errorMessage || 'Please try again.')}
@@ -287,7 +300,7 @@ export default function CreateServicePage() {
               <div className="pt-1 flex items-center gap-2">
                 <span className="text-[10px] text-[#A8A397]">Transaction Hash:</span>
                 <a
-                  href={`https://testnet.bscscan.com/tx/${txHash}`}
+                  href={`${listingExplorer}/tx/${txHash}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[#C9A45C] hover:underline font-mono text-[11px] inline-flex items-center gap-1"
@@ -321,7 +334,7 @@ export default function CreateServicePage() {
               Publish a Service Listing
             </h1>
             <p className="text-xs text-[#A8A397]">
-              Advertise your specialized human skills or autonomous AI agent services. Your listing ID and metadata content hash are anchored on-chain in <strong>VeilServiceRegistry</strong> on BNB Chain Testnet.
+              Advertise your specialized human skills or autonomous AI agent services. Your listing ID and metadata content hash are anchored on-chain in <strong>VeilServiceRegistry</strong> on {listingNetworkName}.
             </p>
           </div>
 
@@ -345,7 +358,7 @@ export default function CreateServicePage() {
                 Network
               </span>
               <span className="text-xs font-bold text-[#C9A45C]">
-                BNB Chain Testnet (97)
+                {listingNetworkName} ({listingChainId})
               </span>
             </div>
           </div>
@@ -457,7 +470,7 @@ export default function CreateServicePage() {
             {/* Price (BNB) */}
             <div className="space-y-1.5">
               <label className="text-[10px] uppercase tracking-widest text-[#A8A397] font-bold block">
-                Base Price in BNB (Native Escrow) *
+                Base Price in {listingCurrency} (Native Escrow) *
               </label>
               <div className="relative">
                 <input
@@ -471,7 +484,7 @@ export default function CreateServicePage() {
                   className="w-full bg-[#0A0A09] border border-white/10 rounded-xl pl-4 pr-16 py-3 text-xs text-[#F5F2E8] placeholder:text-[#A8A397]/40 focus:outline-none focus:border-[#C9A45C] font-mono"
                 />
                 <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-[#C9A45C]">
-                  tBNB
+                  {listingChainId === 84532 ? 'ETH' : 'tBNB'}
                 </span>
               </div>
             </div>

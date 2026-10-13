@@ -29,6 +29,11 @@ artifacts/
 cache/
 coverage/
 
+# Solana / Anchor build artifacts and generated program keypairs
+/target/
+**/target/
+.anchor/
+
 # Generated TypeScript
 *.tsbuildinfo
 
@@ -50,3 +55,16 @@ data/
 .hardhat-local-test-localapp/
 .local-product-e2e/
 
+
+# Internal / non-product (jangan di-push)
+internal/
+.agents/
+vid/
+AGENTS.md
+CLAUDE.md
+.claude/
+
+# Solana keypairs / wallet files
+*-keypair.json
+id.json
+*.seed

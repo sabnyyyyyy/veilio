@@ -42,6 +42,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.MockERC721__factory>;
     getContractFactory(
+      name: "NftGriefer",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.NftGriefer__factory>;
+    getContractFactory(
       name: "RejectingReceiver",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.RejectingReceiver__factory>;
@@ -110,6 +114,11 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.MockERC721>;
     getContractAt(
+      name: "NftGriefer",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.NftGriefer>;
+    getContractAt(
       name: "RejectingReceiver",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -179,6 +188,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.MockERC721>;
     deployContract(
+      name: "NftGriefer",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.NftGriefer>;
+    deployContract(
       name: "RejectingReceiver",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.RejectingReceiver>;
@@ -246,6 +259,11 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.MockERC721>;
+    deployContract(
+      name: "NftGriefer",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.NftGriefer>;
     deployContract(
       name: "RejectingReceiver",
       args: any[],

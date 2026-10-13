@@ -18,18 +18,28 @@ export interface CanonicalServiceMetadata {
 
 /**
  * Formats human-readable string ID into bytes32 representation for on-chain contract.
+ * Throws for ids longer than 32 UTF-8 bytes (the old fallback silently produced a value
+ * longer than bytes32 that could never match the on-chain record).
  */
 export function formatServiceRegistryId(idStr: string): `0x${string}` {
-  try {
-    const hex = stringToHex(idStr);
-    return pad(hex, { size: 32, dir: 'right' });
-  } catch {
-    return ('0x' + Buffer.from(idStr.padEnd(32, '\0')).toString('hex')) as `0x${string}`;
+  const hex = stringToHex(idStr);
+  if ((hex.length - 2) / 2 > 32) {
+    throw new Error(`Service id "${idStr}" exceeds 32 bytes and cannot be used as a bytes32 registry id`);
   }
+  return pad(hex, { size: 32, dir: 'right' });
 }
 
 /**
  * Creates deterministic canonical metadata object with sorted keys.
+ *
+ * `createdAt` is REQUIRED and is part of the hash: the create page generates it once,
+ * hashes it into the on-chain metadataHash, sends it to POST /api/services, the DB stores
+ * it verbatim, and every verifier (API GET, agent API, serviceRegistryVerification)
+ * passes the stored value back in. There is deliberately no Date.now() default, because
+ * a default made every caller hash a different timestamp.
+ *
+ * Seller: EVM (0x) addresses are lowercased; Solana base58 keys are case-sensitive and
+ * kept verbatim.
  */
 export function buildCanonicalMetadata(params: {
   id: string;
@@ -43,11 +53,15 @@ export function buildCanonicalMetadata(params: {
   currency: string;
   deliveryTime: string;
   sampleDeliverables: string[];
-  createdAt?: number;
+  createdAt: number;
 }): CanonicalServiceMetadata {
+  if (!Number.isSafeInteger(params.createdAt) || params.createdAt <= 0) {
+    throw new Error('buildCanonicalMetadata: createdAt must be a positive integer millisecond timestamp');
+  }
+  const seller = params.seller.trim();
   return {
     id: params.id.trim(),
-    seller: params.seller.toLowerCase().trim(),
+    seller: /^0x[0-9a-fA-F]{40}$/.test(seller) ? seller.toLowerCase() : seller,
     sellerType: params.sellerType,
     sellerName: params.sellerName.trim(),
     title: params.title.trim(),
@@ -58,7 +72,7 @@ export function buildCanonicalMetadata(params: {
     deliveryTime: params.deliveryTime.trim(),
     sampleDeliverables: (params.sampleDeliverables || []).map((s) => s.trim()).filter((s) => s.length > 0),
     version: '1.0.0',
-    createdAt: params.createdAt || Date.now(),
+    createdAt: params.createdAt,
   };
 }
 

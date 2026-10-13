@@ -36,3 +36,50 @@ export function createServiceAuthMessage(input: {
     'Purpose: Authorize off-chain state change for VEILIO Services escrow.',
   ].join('\n');
 }
+
+// ============================================================================
+// Read / chat session authorization
+// ============================================================================
+//
+// Scheme (used by conversations, messages, payment-request reads and order reads):
+//   - The wallet signs createServiceAuthMessage({ action: SERVICE_SESSION_ACTION,
+//     orderId: SERVICE_SESSION_SCOPE, address, timestamp, nonce }) once.
+//   - The resulting ServiceAuthPayload is sent either as JSON in the
+//     `x-veilio-auth` request header (GET requests) or as `auth` in a JSON body.
+//   - The server accepts it for SERVICE_SESSION_MAX_AGE_MS after `timestamp`. The
+//     nonce is NOT consumed, so the same session can authorize read polling and
+//     chat messages without a wallet prompt per request. It never authorizes
+//     escrow/state-changing order actions, which keep per-request signed nonces.
+//   - The server additionally checks that the session address is a participant of
+//     the conversation / order being accessed.
+
+export const SERVICE_SESSION_ACTION = 'services-session';
+export const SERVICE_SESSION_SCOPE = 'session';
+export const SERVICE_SESSION_MAX_AGE_MS = 30 * 60 * 1000;
+export const SERVICE_AUTH_HEADER = 'x-veilio-auth';
+
+export function createServiceSessionMessage(input: {
+  address: string;
+  timestamp: number;
+  nonce: string;
+}): string {
+  return createServiceAuthMessage({
+    action: SERVICE_SESSION_ACTION,
+    orderId: SERVICE_SESSION_SCOPE,
+    address: input.address,
+    timestamp: input.timestamp,
+    nonce: input.nonce,
+  });
+}
+
+/** True while a cached session payload is still comfortably inside its validity window. */
+export function isServiceSessionFresh(auth: ServiceAuthPayload | null | undefined, address?: string | null): boolean {
+  if (!auth || !auth.signature) return false;
+  if (address && auth.address.toLowerCase() !== address.toLowerCase()) return false;
+  // Refresh one minute before the server-side expiry.
+  return Date.now() - auth.timestamp < SERVICE_SESSION_MAX_AGE_MS - 60 * 1000;
+}
+
+export function encodeServiceAuthHeader(auth: ServiceAuthPayload): Record<string, string> {
+  return { [SERVICE_AUTH_HEADER]: JSON.stringify(auth) };
+}

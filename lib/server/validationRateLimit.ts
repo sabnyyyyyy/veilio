@@ -33,7 +33,7 @@ const SLIDING_WINDOW_SCRIPT = [
 
 /**
  * Checks whether an incoming validation request is within rate limits.
- * Uses shared Redis sliding window when configured; falls back to in-memory sliding window.
+ * Uses shared Redis sliding window when configured. Local fallback is limited to non-production.
  */
 export async function allowValidationRequest(
   identifier: string,
@@ -68,9 +68,17 @@ export async function allowValidationRequest(
 
       return { allowed, remaining, retryAfterSeconds, limit: maxLimit };
     } catch (err) {
+      if (process.env.NODE_ENV === 'production') {
+        console.error('[Validation Rate Limiter] Shared Redis unavailable; rejecting request.');
+        throw new Error('Shared validation rate limiter is unavailable.');
+      }
       console.warn('[Validation Rate Limiter] Redis evaluation failed, falling back to local memory:', err);
       // Fall through to in-memory limiter
     }
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Shared validation rate limiter is not configured.');
   }
 
   // In-memory sliding window fallback

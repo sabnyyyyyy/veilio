@@ -21,6 +21,18 @@ describe('VEILIO encrypted asset security', function () {
     expect(message).to.contain(address);
     expect(message).to.contain('NEXT_PUBLIC_V4_CONTRACT_ADDRESS');
     expect(contractReadErrorMessage(new Error('RPC timeout'), address)).to.contain('network connection');
+
+    // ABI mismatch
+    const abiErr = contractReadErrorMessage(new Error('could not decode result data (function does not exist)'), address);
+    expect(abiErr).to.contain('ABI mismatch');
+
+    // Network mismatch
+    const netErr = contractReadErrorMessage(new Error('error'), address, { chainId: 84532, expectedChainId: 97 });
+    expect(netErr).to.contain('Network mismatch');
+
+    // Contract execution revert
+    const revertErr = contractReadErrorMessage(new Error('execution reverted'), address);
+    expect(revertErr).to.contain('reverted');
   });
 
   it('allows representative formats for every file-backed asset category', function () {

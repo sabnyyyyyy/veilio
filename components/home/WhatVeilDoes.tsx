@@ -2,8 +2,8 @@ import React from 'react';
 
 export default function WhatVeilDoes() {
   return (
-    <section className="py-24 lg:py-32 relative overflow-hidden border-b border-white/5">
-      <div className="max-w-[1300px] mx-auto px-6 relative z-10">
+    <section id="action" className="py-24 lg:py-32 relative overflow-hidden border-b border-white/5 scroll-mt-20">
+      <div className="max-w-[1440px] mx-auto px-6 sm:px-10 lg:px-16 relative z-10">
         
         {/* Narrative Intro */}
         <div className="mb-20">

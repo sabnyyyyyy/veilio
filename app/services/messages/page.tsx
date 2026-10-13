@@ -4,8 +4,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import ServicesNav from '@/components/services/ServicesNav';
-import { useAccount, useSignMessage } from 'wagmi';
-import { createServiceAuthMessage, generateAuthNonce } from '@/lib/serviceAuth';
+import { useAccount } from 'wagmi';
+import { useServicesWalletAuth } from '@/components/services/useServicesWalletAuth';
 import {
   MessageSquare,
   Bot,
@@ -21,12 +21,46 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import type { Conversation, ServiceMessage, PaymentRequest } from '@/lib/server/servicesDb';
+import { saveServiceActivity } from '@/lib/walletStorage';
+
+// Accepts canonical ids ('base:84532') and legacy stored labels ('Base Sepolia').
+function paymentRequestNetworkLabel(network: string | undefined, bnbLabel: string): string {
+  const n = String(network || '').toLowerCase();
+  if (n.includes('base')) return 'Base Sepolia';
+  if (n.includes('solana')) return 'Solana Devnet';
+  return bnbLabel;
+}
 
 export function ServicesMessagesContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { address, isConnected } = useAccount();
-  const { signMessageAsync } = useSignMessage();
+  const { address: evmAddress, isConnected: evmConnected } = useAccount();
+  const { getSession, getSessionHeaders, signAction } = useServicesWalletAuth();
+
+  // Solana participants chat with their injected (Phantom-compatible) wallet.
+  const [solanaAddress, setSolanaAddress] = useState<string | null>(null);
+  useEffect(() => {
+    const provider = typeof window !== 'undefined' ? (window as any).solana : null;
+    if (!provider) return;
+    if (provider.publicKey) setSolanaAddress(provider.publicKey.toString());
+    const onChange = (pk: any) => setSolanaAddress(pk ? pk.toString() : null);
+    provider.on?.('accountChanged', onChange);
+    return () => provider.removeListener?.('accountChanged', onChange);
+  }, []);
+  const connectSolanaWallet = async () => {
+    const provider = typeof window !== 'undefined' ? (window as any).solana : null;
+    if (!provider) {
+      alert('Phantom or a compatible Solana wallet is not detected.');
+      return;
+    }
+    const res = await provider.connect();
+    setSolanaAddress(res.publicKey.toString());
+  };
+
+  // Active chat identity: the EVM wallet if connected, otherwise the Solana wallet.
+  const address = evmAddress || solanaAddress || undefined;
+  const isConnected = evmConnected || Boolean(solanaAddress);
+  const [authError, setAuthError] = useState<string | null>(null);
 
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -40,6 +74,7 @@ export function ServicesMessagesContent() {
   // Payment Request Modal
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [prPrice, setPrPrice] = useState('');
+  const [prNetwork, setPrNetwork] = useState<'bnb:97' | 'base:84532' | 'solana:devnet'>('bnb:97');
   const [prDescription, setPrDescription] = useState('');
   const [prScope, setPrScope] = useState('');
   const [prDeadlineDays, setPrDeadlineDays] = useState('3');
@@ -55,8 +90,12 @@ export function ServicesMessagesContent() {
       return;
     }
     try {
-      const res = await fetch(`/api/conversations?userAddress=${address}`);
+      // Signed services session (one wallet prompt, reused for polling; see lib/serviceAuth.ts)
+      const headers = await getSessionHeaders(address);
+      setAuthError(null);
+      const res = await fetch('/api/conversations', { headers, cache: 'no-store' });
       const data = await res.json();
+      if (!res.ok) setAuthError(data.error || 'Failed to load conversations');
       if (data.success && Array.isArray(data.conversations)) {
         setConversations(data.conversations);
         // If query has conversationId, activate it
@@ -67,8 +106,9 @@ export function ServicesMessagesContent() {
           setActiveConvId(data.conversations[0].id);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      setAuthError(err?.message || 'Wallet session signature is required to load conversations');
     } finally {
       setLoadingConvs(false);
     }
@@ -80,10 +120,11 @@ export function ServicesMessagesContent() {
 
   // Fetch messages for active conversation
   const fetchMessages = async (showSpinner = false) => {
-    if (!activeConvId) return;
+    if (!activeConvId || !address) return;
     try {
       if (showSpinner) setLoadingMsgs(true);
-      const res = await fetch(`/api/conversations/${activeConvId}/messages`);
+      const headers = await getSessionHeaders(address);
+      const res = await fetch(`/api/conversations/${activeConvId}/messages`, { headers, cache: 'no-store' });
       const data = await res.json();
       if (data.success && Array.isArray(data.messages)) {
         setMessages(data.messages);
@@ -95,7 +136,7 @@ export function ServicesMessagesContent() {
 
         for (const prId of prIds) {
           if (!paymentRequestsMap[prId]) {
-            fetch(`/api/payment-requests/${prId}`)
+            fetch(`/api/payment-requests/${prId}`, { headers, cache: 'no-store' })
               .then((r) => r.json())
               .then((prData) => {
                 if (prData.success && prData.paymentRequest) {
@@ -125,7 +166,7 @@ export function ServicesMessagesContent() {
       }, 3000);
       return () => clearInterval(interval);
     }
-  }, [activeConvId]);
+  }, [activeConvId, address]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -137,6 +178,7 @@ export function ServicesMessagesContent() {
 
     try {
       setSending(true);
+      const session = await getSession(address);
       const res = await fetch(`/api/conversations/${activeConvId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -144,6 +186,7 @@ export function ServicesMessagesContent() {
           senderId: address,
           senderType: 'human',
           content: inputText.trim(),
+          auth: session,
         }),
       });
 
@@ -170,6 +213,9 @@ export function ServicesMessagesContent() {
       setCreatingPr(true);
       const deadlineDaysNum = Number(prDeadlineDays) || 3;
       const deadline = Date.now() + deadlineDaysNum * 24 * 3600 * 1000;
+      const currency = prNetwork === 'base:84532' ? 'ETH' : prNetwork === 'solana:devnet' ? 'SOL' : 'BNB';
+      // Payment terms are financial: per-request signature with a consumed nonce.
+      const prAuth = await signAction(address, 'create-payment-request', activeConv.id);
 
       const res = await fetch('/api/payment-requests', {
         method: 'POST',
@@ -182,17 +228,34 @@ export function ServicesMessagesContent() {
           description: prDescription.trim(),
           scope: prScope.trim() || prDescription.trim(),
           agreedPrice: prPrice.trim(),
-          currency: 'BNB',
+          currency,
+          network: prNetwork,
           deadline,
+          auth: prAuth,
         }),
       });
 
       const data = await res.json();
       if (data.success && data.paymentRequest) {
+        saveServiceActivity({
+          id: `pr_${data.paymentRequest.id}`,
+          type: 'payment_request_created',
+          orderId: data.paymentRequest.id,
+          title: prDescription.trim() || 'Service Payment Request',
+          amount: prPrice.trim(),
+          currency,
+          userAddress: address,
+          role: 'seller',
+          networkId: prNetwork,
+          timestamp: Date.now(),
+          status: 'AwaitingPayment',
+          isOnChainConfirmed: false,
+        });
         setShowPaymentModal(false);
         setPrPrice('');
         setPrDescription('');
         setPrScope('');
+        setPrNetwork('bnb:97');
         fetchMessages(false);
       } else {
         alert(data.error || 'Failed to create payment request');
@@ -210,29 +273,14 @@ export function ServicesMessagesContent() {
 
     try {
       // Generate cryptographic authentication payload (SEC-NEW-02)
-      const authTimestamp = Date.now();
-      const authNonce = generateAuthNonce();
-      const authMessage = createServiceAuthMessage({
-        action: 'accept-payment-request',
-        orderId: paymentRequestId,
-        address,
-        timestamp: authTimestamp,
-        nonce: authNonce,
-      });
-
-      const signature = await signMessageAsync({ message: authMessage });
+      const acceptAuth = await signAction(address, 'accept-payment-request', paymentRequestId);
 
       const res = await fetch(`/api/payment-requests/${paymentRequestId}/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           buyerAddress: address,
-          auth: {
-            address,
-            signature,
-            timestamp: authTimestamp,
-            nonce: authNonce,
-          },
+          auth: acceptAuth,
         }),
       });
 
@@ -265,6 +313,12 @@ export function ServicesMessagesContent() {
               <p className="text-xs text-[#A8A397]">
                 Private service negotiations are authenticated by your Web3 wallet address.
               </p>
+              <button
+                onClick={() => connectSolanaWallet().catch((err) => console.error(err))}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors"
+              >
+                Connect Solana Wallet
+              </button>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 flex-1 min-h-[620px] bg-[#151512] border border-white/5 rounded-3xl overflow-hidden shadow-2xl">
@@ -278,6 +332,14 @@ export function ServicesMessagesContent() {
                 </div>
 
                 <div className="flex-1 overflow-y-auto divide-y divide-white/5">
+                  {authError && (
+                    <div className="p-4 text-[11px] text-rose-300 space-y-2">
+                      <p>{authError}</p>
+                      <button onClick={() => fetchConversations()} className="underline text-[#C9A45C]">
+                        Sign in again
+                      </button>
+                    </div>
+                  )}
                   {loadingConvs ? (
                     <div className="p-8 flex justify-center">
                       <Loader2 className="w-6 h-6 text-[#C9A45C] animate-spin" />
@@ -402,11 +464,16 @@ export function ServicesMessagesContent() {
                                     <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[#C9A45C]">
                                       <CreditCard className="w-4 h-4" /> Agreed Payment Request
                                     </span>
-                                    <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
-                                      pr.status === 'accepted' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
-                                    }`}>
-                                      {pr.status}
-                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+                                        {paymentRequestNetworkLabel(pr.network, 'BNB Chain')}
+                                      </span>
+                                      <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                                        pr.status === 'accepted' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
+                                      }`}>
+                                        {pr.status}
+                                      </span>
+                                    </div>
                                   </div>
 
                                   <div className="space-y-1.5 text-xs">
@@ -441,7 +508,7 @@ export function ServicesMessagesContent() {
                                         <div>
                                           <div className="font-bold text-amber-200">Terms Accepted — Awaiting On-Chain Deposit</div>
                                           <div className="text-[10px] text-amber-300/80 mt-0.5 leading-relaxed">
-                                            Agreement is authorized off-chain. Funds are NOT yet in escrow until the buyer submits an on-chain deposit on BNB Chain Testnet.
+                                            Agreement is authorized off-chain. Funds are NOT yet in escrow until the buyer submits an on-chain deposit on {paymentRequestNetworkLabel(pr.network, 'BNB Chain Testnet')}.
                                           </div>
                                         </div>
                                       </div>
@@ -543,7 +610,22 @@ export function ServicesMessagesContent() {
             <form onSubmit={handleCreatePaymentRequest} className="space-y-4">
               <div className="space-y-1.5">
                 <label className="text-[10px] uppercase tracking-widest text-[#A8A397] block font-bold">
-                  Agreed Price (BNB) *
+                  Escrow Settlement Network *
+                </label>
+                <select
+                  value={prNetwork}
+                  onChange={(e) => setPrNetwork(e.target.value as any)}
+                  className="w-full bg-[#0A0A09] border border-white/10 rounded-xl px-4 py-2.5 text-xs text-[#F5F2E8] focus:outline-none focus:border-[#C9A45C]"
+                >
+                  <option value="bnb:97">BNB Chain Testnet (BNB)</option>
+                  <option value="base:84532">Base Sepolia (ETH)</option>
+                  <option value="solana:devnet">Solana Devnet (SOL)</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] uppercase tracking-widest text-[#A8A397] block font-bold">
+                  Agreed Price ({prNetwork === 'base:84532' ? 'ETH' : prNetwork === 'solana:devnet' ? 'SOL' : 'BNB'}) *
                 </label>
                 <input
                   type="number"

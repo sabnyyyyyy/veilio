@@ -1,19 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServiceById, updateService } from '@/lib/server/servicesDb';
+import { getServiceById, updateService, sameWalletAddress } from '@/lib/server/servicesDb';
 import { isAddress, parseEventLogs } from 'viem';
 import { verifyServiceAuth } from '@/lib/server/serviceAuth';
-import { agentPublicClient } from '@/lib/agent-sdk/server';
-import {
-  VEIL_SERVICE_REGISTRY_ABI,
-  VEIL_SERVICE_REGISTRY_CONTRACT_ADDRESS,
-} from '@/lib/serviceContract';
+import { getAgentPublicClientForChain } from '@/lib/agent-sdk/server';
+import { getServiceRegistryAddress } from '@/lib/serviceContract';
 import {
   buildCanonicalMetadata,
   hashCanonicalMetadata,
-  verifyMetadataHash,
 } from '@/lib/serviceRegistry';
 import { calculateSellerReputation } from '@/lib/server/serviceReputation';
-import { verifyServiceOnChain } from '@/lib/server/serviceRegistryVerification';
+import { verifyServiceOnChain, computeListingMetadataHash } from '@/lib/server/serviceRegistryVerification';
 
 
 export async function GET(
@@ -30,23 +26,9 @@ export async function GET(
     const onChainResult = await verifyServiceOnChain(service);
     const reputation = calculateSellerReputation(service.sellerId);
 
-    // Verify metadata hash against current state
-    const canonicalMeta = buildCanonicalMetadata({
-      id: service.id,
-      seller: service.sellerId,
-      sellerType: service.sellerType,
-      sellerName: service.sellerName || 'Specialist',
-      title: service.title,
-      description: service.description,
-      category: service.category,
-      price: service.price,
-      currency: service.currency,
-      deliveryTime: service.deliveryTime,
-      sampleDeliverables: service.sampleDeliverables,
-      createdAt: service.createdAt,
-    });
+    // Verify the stored hash against the stored fields (incl. stored createdAt)
     const metadataVerified = service.metadataHash
-      ? verifyMetadataHash(canonicalMeta, service.metadataHash)
+      ? computeListingMetadataHash(service).toLowerCase() === service.metadataHash.toLowerCase()
       : false;
 
     return NextResponse.json({
@@ -98,15 +80,15 @@ export async function PATCH(
       return NextResponse.json({ error: 'Service not found' }, { status: 404 });
     }
 
-    if (current.sellerId.toLowerCase() !== caller.toLowerCase()) {
+    if (!sameWalletAddress(current.sellerId, caller)) {
       return NextResponse.json(
         { error: 'Unauthorized: only the service seller can modify this listing' },
         { status: 403 }
       );
     }
 
-    // 1. Cryptographic wallet authentication (if auth payload provided)
-    if (auth || body.signature) {
+    // 1. Cryptographic wallet authentication (required)
+    {
       const authResult = await verifyServiceAuth({
         action: 'update-service',
         orderId: id,
@@ -133,9 +115,10 @@ export async function PATCH(
         return NextResponse.json({ error: 'Invalid transaction hash format' }, { status: 400 });
       }
 
+      const listingChainId = current.network === 'base:84532' ? 84532 : 97;
       let receipt;
       try {
-        receipt = await agentPublicClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
+        receipt = await getAgentPublicClientForChain(listingChainId).getTransactionReceipt({ hash: txHash as `0x${string}` });
       } catch (rpcErr: any) {
         return NextResponse.json(
           { error: `Registry transaction not confirmed on-chain: ${rpcErr?.shortMessage || rpcErr?.message || 'Transaction receipt not found'}` },
@@ -146,6 +129,14 @@ export async function PATCH(
       if (!receipt || receipt.status !== 'success') {
         return NextResponse.json(
           { error: 'On-chain service registry update transaction failed or reverted' },
+          { status: 400 }
+        );
+      }
+
+      const registryAddress = getServiceRegistryAddress(listingChainId);
+      if (!receipt.to || !registryAddress || receipt.to.toLowerCase() !== registryAddress.toLowerCase()) {
+        return NextResponse.json(
+          { error: `Registry update transaction must target VeilServiceRegistry (${registryAddress})` },
           { status: 400 }
         );
       }

@@ -17,24 +17,39 @@ import {
   Lock,
 } from 'lucide-react';
 import { stringToHex, pad } from 'viem';
-import { useWriteContract, usePublicClient, useSignMessage } from 'wagmi';
+import { useAccount, useWriteContract, usePublicClient } from 'wagmi';
 import {
-  VEIL_SERVICE_ESCROW_CONTRACT_ADDRESS,
   VEIL_SERVICE_ESCROW_ABI,
+  getServiceEscrowAddress,
 } from '@/lib/serviceContract';
-import { createServiceAuthMessage, generateAuthNonce } from '@/lib/serviceAuth';
+import type { ServiceAuthPayload } from '@/lib/serviceAuth';
+import {
+  createDisputeOrderInstruction,
+  createResolveDisputeInstruction,
+  getSolanaServiceEscrowProgramId,
+  getSolanaServiceFeeRecipient,
+  toSolanaEscrowOrderIdHex,
+} from '@/lib/cross-chain/solanaServiceEscrow';
+import type { SolanaCompiledInstruction } from '@/lib/cross-chain/solanaServiceRegistry';
+import { useServicesWalletAuth } from '@/components/services/useServicesWalletAuth';
 import type {
   ServiceOrder,
   ServiceDispute,
   DisputeEvidence,
   DisputeAiRecommendation,
+  ServiceNetworkId,
 } from '@/lib/server/servicesDb';
 
 interface DisputeResolutionPanelProps {
   order: ServiceOrder;
   dispute: ServiceDispute | null;
+  /** Wallet acting on this order (EVM address, or the Solana wallet for Solana orders). */
   currentUserAddress?: string;
   onRefresh: () => void;
+  /** Settlement network; defaults to order.network (legacy: BNB Testnet). */
+  network?: ServiceNetworkId;
+  /** Required for Solana orders: signs + sends an escrow instruction, returns the signature. */
+  sendSolanaInstruction?: (ix: SolanaCompiledInstruction) => Promise<string>;
 }
 
 export default function DisputeResolutionPanel({
@@ -42,10 +57,39 @@ export default function DisputeResolutionPanel({
   dispute,
   currentUserAddress,
   onRefresh,
+  network: networkProp,
+  sendSolanaInstruction,
 }: DisputeResolutionPanelProps) {
   const { writeContractAsync } = useWriteContract();
-  const { signMessageAsync } = useSignMessage();
+  const { chainId: walletChainId } = useAccount();
+  const { signAction } = useServicesWalletAuth();
   const publicClient = usePublicClient();
+
+  const network: ServiceNetworkId = networkProp || order.network || 'bnb:97';
+  const isSolanaOrder = network === 'solana:devnet';
+  const evmChainId = network === 'base:84532' ? 84532 : 97;
+  const evmNetworkName = evmChainId === 84532 ? 'Base Sepolia (84532)' : 'BNB Chain Testnet (97)';
+  const escrowAddress = getServiceEscrowAddress(evmChainId);
+  const txExplorerUrl = (tx: string) =>
+    isSolanaOrder
+      ? `https://explorer.solana.com/tx/${tx}?cluster=devnet`
+      : evmChainId === 84532
+      ? `https://sepolia.basescan.org/tx/${tx}`
+      : `https://testnet.bscscan.com/tx/${tx}`;
+
+  const assertEvmChain = () => {
+    if (!escrowAddress) {
+      throw new Error(`Service escrow contract is not configured for ${evmNetworkName}.`);
+    }
+    if (walletChainId && walletChainId !== evmChainId) {
+      throw new Error(`Please switch your wallet network to ${evmNetworkName}.`);
+    }
+  };
+
+  const signAuth = async (action: string, scopeId: string): Promise<ServiceAuthPayload> => {
+    if (!currentUserAddress) throw new Error('No wallet connected.');
+    return signAction(currentUserAddress, action, scopeId);
+  };
 
   // Initiation State
   const [showInitiateModal, setShowInitiateModal] = useState(false);
@@ -72,8 +116,10 @@ export default function DisputeResolutionPanel({
   const [reviewerReason, setReviewerReason] = useState('');
   const [reviewing, setReviewing] = useState(false);
 
-  const isBuyer = currentUserAddress && currentUserAddress.toLowerCase() === order.buyerId.toLowerCase();
-  const isSeller = currentUserAddress && currentUserAddress.toLowerCase() === order.sellerId.toLowerCase();
+  const sameAddress = (a?: string, b?: string) =>
+    Boolean(a && b) && (isSolanaOrder ? a === b : a!.toLowerCase() === b!.toLowerCase());
+  const isBuyer = sameAddress(currentUserAddress, order.buyerId);
+  const isSeller = sameAddress(currentUserAddress, order.sellerId);
 
   // Helper to convert orderId to bytes32
   const getBytes32OrderId = (idStr: string) => {
@@ -93,19 +139,29 @@ export default function DisputeResolutionPanel({
     try {
       setInitiating(true);
 
-      // On-chain dispute execution if order has on-chain escrow
-      let onChainDisputeTx: `0x${string}` | undefined;
-      if (order.escrowTxHash || order.paymentStatus === 'Funded') {
+      // On-chain dispute on the order's own network (required: escrow funds are locked)
+      let onChainDisputeTx: string;
+      if (isSolanaOrder) {
+        if (!sendSolanaInstruction) throw new Error('Connect your Solana wallet to open a dispute on Solana Devnet.');
+        onChainDisputeTx = await sendSolanaInstruction(createDisputeOrderInstruction({
+          programId: getSolanaServiceEscrowProgramId(),
+          caller: currentUserAddress,
+          orderId: toSolanaEscrowOrderIdHex(order.id),
+          reason: disputeReason.trim().slice(0, 200),
+        }));
+      } else {
+        assertEvmChain();
         const orderBytes32 = getBytes32OrderId(order.id);
-        onChainDisputeTx = await writeContractAsync({
-          address: VEIL_SERVICE_ESCROW_CONTRACT_ADDRESS,
+        const evmTx = await writeContractAsync({
+          address: escrowAddress,
           abi: VEIL_SERVICE_ESCROW_ABI,
           functionName: 'dispute',
           args: [orderBytes32, disputeReason.trim()],
         });
+        onChainDisputeTx = evmTx;
 
-        if (publicClient && onChainDisputeTx) {
-          const receipt = await publicClient.waitForTransactionReceipt({ hash: onChainDisputeTx });
+        if (publicClient && evmTx) {
+          const receipt = await publicClient.waitForTransactionReceipt({ hash: evmTx });
           if (receipt.status !== 'success') {
             throw new Error('On-chain dispute transaction failed or reverted.');
           }
@@ -113,16 +169,7 @@ export default function DisputeResolutionPanel({
       }
 
       // Sign authentication payload
-      const authTimestamp = Date.now();
-      const authNonce = generateAuthNonce();
-      const authMessage = createServiceAuthMessage({
-        action: 'dispute',
-        orderId: order.id,
-        address: currentUserAddress,
-        timestamp: authTimestamp,
-        nonce: authNonce,
-      });
-      const signature = await signMessageAsync({ message: authMessage });
+      const disputeAuth = await signAuth('dispute', order.id);
 
       const res = await fetch(`/api/services/orders/${order.id}/disputes`, {
         method: 'POST',
@@ -134,12 +181,7 @@ export default function DisputeResolutionPanel({
           evidenceDescription: evidenceDesc.trim() || undefined,
           evidenceReferences: evidenceRef.trim() ? [evidenceRef.trim()] : undefined,
           txHash: onChainDisputeTx,
-          auth: {
-            address: currentUserAddress,
-            signature,
-            timestamp: authTimestamp,
-            nonce: authNonce,
-          },
+          auth: disputeAuth,
         }),
       });
 
@@ -169,6 +211,7 @@ export default function DisputeResolutionPanel({
 
     try {
       setSubmittingEvidence(true);
+      const evidenceAuth = await signAuth('submit-dispute-evidence', dispute.id);
       const res = await fetch(`/api/services/disputes/${dispute.id}/evidence`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -178,6 +221,7 @@ export default function DisputeResolutionPanel({
           title: newEvTitle.trim(),
           description: newEvDesc.trim(),
           references: newEvRef.trim() ? [newEvRef.trim()] : [],
+          auth: evidenceAuth,
         }),
       });
 
@@ -201,12 +245,17 @@ export default function DisputeResolutionPanel({
 
   // Run AI Evaluation
   const handleRunAiEvaluation = async () => {
-    if (!dispute) return;
+    if (!dispute || !currentUserAddress || (!isBuyer && !isSeller)) return;
 
     try {
       setEvaluating(true);
+      const evaluateAuth = await signAuth('evaluate-dispute', dispute.id);
       const res = await fetch(`/api/services/disputes/${dispute.id}/evaluate`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          auth: evaluateAuth,
+        }),
       });
 
       const data = await res.json();
@@ -239,33 +288,48 @@ export default function DisputeResolutionPanel({
 
     try {
       setReviewing(true);
-      const orderBytes32 = getBytes32OrderId(order.id);
+      const preflightRes = await fetch(`/api/services/disputes/${dispute.id}/review`, { cache: 'no-store' });
+      const preflight = await preflightRes.json();
+      if (!preflightRes.ok || !preflight.ready) {
+        throw new Error(preflight.error || 'Reviewer settlement is not configured.');
+      }
+      if (!sameAddress(String(preflight.reviewerAddress), currentUserAddress)) {
+        throw new Error('Connect the designated reviewer wallet before settling this dispute.');
+      }
 
-      const txHash = await writeContractAsync({
-        address: VEIL_SERVICE_ESCROW_CONTRACT_ADDRESS,
-        abi: VEIL_SERVICE_ESCROW_ABI,
-        functionName: 'resolveDispute',
-        args: [orderBytes32, buyerSplit],
-      });
+      let txHash: string;
+      if (isSolanaOrder) {
+        if (!sendSolanaInstruction) throw new Error('Connect the reviewer Solana wallet to settle on Solana Devnet.');
+        txHash = await sendSolanaInstruction(createResolveDisputeInstruction({
+          programId: getSolanaServiceEscrowProgramId(),
+          reviewer: currentUserAddress,
+          buyer: order.buyerId,
+          seller: order.sellerId,
+          feeRecipient: getSolanaServiceFeeRecipient(),
+          orderId: toSolanaEscrowOrderIdHex(order.id),
+          splitToBuyerPercent: buyerSplit,
+        }));
+      } else {
+        assertEvmChain();
+        const orderBytes32 = getBytes32OrderId(order.id);
+        const evmTx = await writeContractAsync({
+          address: escrowAddress,
+          abi: VEIL_SERVICE_ESCROW_ABI,
+          functionName: 'resolveDispute',
+          args: [orderBytes32, buyerSplit],
+        });
+        txHash = evmTx;
 
-      if (publicClient) {
-        const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
-        if (receipt.status !== 'success') {
-          throw new Error('On-chain dispute resolution transaction failed or was reverted.');
+        if (publicClient) {
+          const receipt = await publicClient.waitForTransactionReceipt({ hash: evmTx });
+          if (receipt.status !== 'success') {
+            throw new Error('On-chain dispute resolution transaction failed or was reverted.');
+          }
         }
       }
 
       // Sign reviewer authentication payload
-      const authTimestamp = Date.now();
-      const authNonce = generateAuthNonce();
-      const authMessage = createServiceAuthMessage({
-        action: 'review-dispute',
-        orderId: dispute.id,
-        address: currentUserAddress,
-        timestamp: authTimestamp,
-        nonce: authNonce,
-      });
-      const signature = await signMessageAsync({ message: authMessage });
+      const reviewAuth = await signAuth('review-dispute', dispute.id);
 
       const res = await fetch(`/api/services/disputes/${dispute.id}/review`, {
         method: 'POST',
@@ -277,12 +341,7 @@ export default function DisputeResolutionPanel({
           sellerGrossAwardPercent: sellerSplit,
           reason: reviewerReason.trim() || 'Reviewer approved resolution following evidence review.',
           settlementTxHash: txHash,
-          auth: {
-            address: currentUserAddress,
-            signature,
-            timestamp: authTimestamp,
-            nonce: authNonce,
-          },
+          auth: reviewAuth,
         }),
       });
 
@@ -441,7 +500,7 @@ export default function DisputeResolutionPanel({
           {dispute.disputeTxHash && (
             <div className="pt-1">
               <a
-                href={`https://testnet.bscscan.com/tx/${dispute.disputeTxHash}`}
+                href={txExplorerUrl(dispute.disputeTxHash)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-[#C9A45C] hover:underline font-mono text-[11px] inline-flex items-center gap-1"
@@ -471,7 +530,7 @@ export default function DisputeResolutionPanel({
             Submitted Evidence Items ({dispute.evidence.length})
           </span>
 
-          {dispute.status !== 'resolved' && (
+          {dispute.status !== 'resolved' && (isBuyer || isSeller) && (
             <button
               onClick={() => setShowEvidenceForm(!showEvidenceForm)}
               className="text-xs text-[#C9A45C] hover:underline flex items-center gap-1 font-semibold"
@@ -599,7 +658,7 @@ export default function DisputeResolutionPanel({
             </span>
           </div>
 
-          {!rec && dispute.status !== 'resolved' && (
+          {!rec && dispute.status !== 'resolved' && (isBuyer || isSeller) && (
             <button
               onClick={handleRunAiEvaluation}
               disabled={evaluating}
@@ -751,7 +810,7 @@ export default function DisputeResolutionPanel({
               <div className="pt-2 text-xs flex items-center gap-2">
                 <span className="text-[#A8A397]">Settlement On-Chain Tx:</span>
                 <a
-                  href={`https://testnet.bscscan.com/tx/${decision.settlementTxHash}`}
+                  href={txExplorerUrl(decision.settlementTxHash)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[#C9A45C] hover:underline font-mono inline-flex items-center gap-1"

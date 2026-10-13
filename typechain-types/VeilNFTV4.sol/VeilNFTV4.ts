@@ -27,49 +27,70 @@ export interface VeilNFTV4Interface extends Interface {
   getFunction(
     nameOrSignature:
       | "BPS_DENOMINATOR"
+      | "MAX_BIDDERS_PER_AUCTION"
+      | "NFT_TRANSFER_GAS"
+      | "NON_REVEAL_PENALTY_PERCENT"
       | "PLATFORM_FEE_BPS"
+      | "REVIEW_TIMEOUT"
       | "acceptDataset"
       | "auctionBidders"
       | "auctionCount"
       | "auctions"
+      | "cancelAuction"
+      | "claimNft"
       | "commitBid"
       | "commitments"
       | "computeCommitment"
       | "createAuction"
       | "createNftAuction"
       | "feeRecipient"
+      | "finalizeRefundTimeout"
       | "finalizeSettlement"
       | "getAuctionState"
       | "markUnderReview"
       | "nftAssets"
+      | "nftClaimant"
       | "onERC1155BatchReceived"
       | "onERC1155Received"
       | "onERC721Received"
+      | "owner"
       | "pendingRefunds"
+      | "refundRequestedAt"
       | "requestRefund"
       | "resolveRefund"
       | "revealBid"
       | "reviewer"
+      | "setFeeRecipient"
+      | "setReviewer"
       | "settleAuction"
       | "supportsInterface"
+      | "transferOwnership"
       | "withdrawRefund"
   ): FunctionFragment;
 
   getEvent(
     nameOrSignatureOrTopic:
+      | "AuctionCancelled"
       | "AuctionCompleted"
       | "AuctionCreated"
       | "AuctionSettledToInspection"
       | "BidCommitted"
       | "BidRevealed"
       | "DatasetAccepted"
+      | "FeeRecipientUpdated"
+      | "NftClaimed"
       | "NftDelivered"
       | "NftEscrowed"
       | "NftReturned"
+      | "NftTransferFailed"
+      | "NonRevealPenaltyCollected"
+      | "OwnershipTransferred"
       | "RefundAvailable"
       | "RefundClaimed"
       | "RefundRequested"
       | "RefundResolved"
+      | "RefundReviewTimedOut"
+      | "ReviewerUpdated"
   ): EventFragment;
 
   encodeFunctionData(
@@ -77,7 +98,23 @@ export interface VeilNFTV4Interface extends Interface {
     values?: undefined
   ): string;
   encodeFunctionData(
+    functionFragment: "MAX_BIDDERS_PER_AUCTION",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "NFT_TRANSFER_GAS",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "NON_REVEAL_PENALTY_PERCENT",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
     functionFragment: "PLATFORM_FEE_BPS",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "REVIEW_TIMEOUT",
     values?: undefined
   ): string;
   encodeFunctionData(
@@ -95,6 +132,14 @@ export interface VeilNFTV4Interface extends Interface {
   encodeFunctionData(
     functionFragment: "auctions",
     values: [BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "cancelAuction",
+    values: [BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "claimNft",
+    values: [BigNumberish, AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "commitBid",
@@ -141,6 +186,10 @@ export interface VeilNFTV4Interface extends Interface {
     values?: undefined
   ): string;
   encodeFunctionData(
+    functionFragment: "finalizeRefundTimeout",
+    values: [BigNumberish]
+  ): string;
+  encodeFunctionData(
     functionFragment: "finalizeSettlement",
     values: [BigNumberish]
   ): string;
@@ -154,6 +203,10 @@ export interface VeilNFTV4Interface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "nftAssets",
+    values: [BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "nftClaimant",
     values: [BigNumberish]
   ): string;
   encodeFunctionData(
@@ -174,9 +227,14 @@ export interface VeilNFTV4Interface extends Interface {
     functionFragment: "onERC721Received",
     values: [AddressLike, AddressLike, BigNumberish, BytesLike]
   ): string;
+  encodeFunctionData(functionFragment: "owner", values?: undefined): string;
   encodeFunctionData(
     functionFragment: "pendingRefunds",
     values: [AddressLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "refundRequestedAt",
+    values: [BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "requestRefund",
@@ -192,12 +250,24 @@ export interface VeilNFTV4Interface extends Interface {
   ): string;
   encodeFunctionData(functionFragment: "reviewer", values?: undefined): string;
   encodeFunctionData(
+    functionFragment: "setFeeRecipient",
+    values: [AddressLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "setReviewer",
+    values: [AddressLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "settleAuction",
     values: [BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "supportsInterface",
     values: [BytesLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "transferOwnership",
+    values: [AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "withdrawRefund",
@@ -209,7 +279,23 @@ export interface VeilNFTV4Interface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "MAX_BIDDERS_PER_AUCTION",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "NFT_TRANSFER_GAS",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "NON_REVEAL_PENALTY_PERCENT",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "PLATFORM_FEE_BPS",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "REVIEW_TIMEOUT",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -225,6 +311,11 @@ export interface VeilNFTV4Interface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "auctions", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "cancelAuction",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(functionFragment: "claimNft", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "commitBid", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "commitments",
@@ -247,6 +338,10 @@ export interface VeilNFTV4Interface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "finalizeRefundTimeout",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "finalizeSettlement",
     data: BytesLike
   ): Result;
@@ -260,6 +355,10 @@ export interface VeilNFTV4Interface extends Interface {
   ): Result;
   decodeFunctionResult(functionFragment: "nftAssets", data: BytesLike): Result;
   decodeFunctionResult(
+    functionFragment: "nftClaimant",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "onERC1155BatchReceived",
     data: BytesLike
   ): Result;
@@ -271,8 +370,13 @@ export interface VeilNFTV4Interface extends Interface {
     functionFragment: "onERC721Received",
     data: BytesLike
   ): Result;
+  decodeFunctionResult(functionFragment: "owner", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "pendingRefunds",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "refundRequestedAt",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -286,6 +390,14 @@ export interface VeilNFTV4Interface extends Interface {
   decodeFunctionResult(functionFragment: "revealBid", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "reviewer", data: BytesLike): Result;
   decodeFunctionResult(
+    functionFragment: "setFeeRecipient",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "setReviewer",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "settleAuction",
     data: BytesLike
   ): Result;
@@ -294,9 +406,26 @@ export interface VeilNFTV4Interface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "transferOwnership",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "withdrawRefund",
     data: BytesLike
   ): Result;
+}
+
+export namespace AuctionCancelledEvent {
+  export type InputTuple = [auctionId: BigNumberish, seller: AddressLike];
+  export type OutputTuple = [auctionId: bigint, seller: string];
+  export interface OutputObject {
+    auctionId: bigint;
+    seller: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
 }
 
 export namespace AuctionCompletedEvent {
@@ -446,6 +575,43 @@ export namespace DatasetAcceptedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
+export namespace FeeRecipientUpdatedEvent {
+  export type InputTuple = [
+    previousFeeRecipient: AddressLike,
+    newFeeRecipient: AddressLike
+  ];
+  export type OutputTuple = [
+    previousFeeRecipient: string,
+    newFeeRecipient: string
+  ];
+  export interface OutputObject {
+    previousFeeRecipient: string;
+    newFeeRecipient: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace NftClaimedEvent {
+  export type InputTuple = [
+    auctionId: BigNumberish,
+    claimant: AddressLike,
+    to: AddressLike
+  ];
+  export type OutputTuple = [auctionId: bigint, claimant: string, to: string];
+  export interface OutputObject {
+    auctionId: bigint;
+    claimant: string;
+    to: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
 export namespace NftDeliveredEvent {
   export type InputTuple = [
     auctionId: BigNumberish,
@@ -533,6 +699,57 @@ export namespace NftReturnedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
+export namespace NftTransferFailedEvent {
+  export type InputTuple = [
+    auctionId: BigNumberish,
+    intendedRecipient: AddressLike
+  ];
+  export type OutputTuple = [auctionId: bigint, intendedRecipient: string];
+  export interface OutputObject {
+    auctionId: bigint;
+    intendedRecipient: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace NonRevealPenaltyCollectedEvent {
+  export type InputTuple = [
+    auctionId: BigNumberish,
+    recipient: AddressLike,
+    amount: BigNumberish
+  ];
+  export type OutputTuple = [
+    auctionId: bigint,
+    recipient: string,
+    amount: bigint
+  ];
+  export interface OutputObject {
+    auctionId: bigint;
+    recipient: string;
+    amount: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace OwnershipTransferredEvent {
+  export type InputTuple = [previousOwner: AddressLike, newOwner: AddressLike];
+  export type OutputTuple = [previousOwner: string, newOwner: string];
+  export interface OutputObject {
+    previousOwner: string;
+    newOwner: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
 export namespace RefundAvailableEvent {
   export type InputTuple = [account: AddressLike, amount: BigNumberish];
   export type OutputTuple = [account: string, amount: bigint];
@@ -603,6 +820,40 @@ export namespace RefundResolvedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
+export namespace RefundReviewTimedOutEvent {
+  export type InputTuple = [
+    auctionId: BigNumberish,
+    winner: AddressLike,
+    amount: BigNumberish
+  ];
+  export type OutputTuple = [auctionId: bigint, winner: string, amount: bigint];
+  export interface OutputObject {
+    auctionId: bigint;
+    winner: string;
+    amount: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace ReviewerUpdatedEvent {
+  export type InputTuple = [
+    previousReviewer: AddressLike,
+    newReviewer: AddressLike
+  ];
+  export type OutputTuple = [previousReviewer: string, newReviewer: string];
+  export interface OutputObject {
+    previousReviewer: string;
+    newReviewer: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
 export interface VeilNFTV4 extends BaseContract {
   connect(runner?: ContractRunner | null): VeilNFTV4;
   waitForDeployment(): Promise<this>;
@@ -648,7 +899,15 @@ export interface VeilNFTV4 extends BaseContract {
 
   BPS_DENOMINATOR: TypedContractMethod<[], [bigint], "view">;
 
+  MAX_BIDDERS_PER_AUCTION: TypedContractMethod<[], [bigint], "view">;
+
+  NFT_TRANSFER_GAS: TypedContractMethod<[], [bigint], "view">;
+
+  NON_REVEAL_PENALTY_PERCENT: TypedContractMethod<[], [bigint], "view">;
+
   PLATFORM_FEE_BPS: TypedContractMethod<[], [bigint], "view">;
+
+  REVIEW_TIMEOUT: TypedContractMethod<[], [bigint], "view">;
 
   acceptDataset: TypedContractMethod<
     [auctionId: BigNumberish],
@@ -708,6 +967,18 @@ export interface VeilNFTV4 extends BaseContract {
       }
     ],
     "view"
+  >;
+
+  cancelAuction: TypedContractMethod<
+    [auctionId: BigNumberish],
+    [void],
+    "nonpayable"
+  >;
+
+  claimNft: TypedContractMethod<
+    [auctionId: BigNumberish, to: AddressLike],
+    [void],
+    "nonpayable"
   >;
 
   commitBid: TypedContractMethod<
@@ -774,6 +1045,12 @@ export interface VeilNFTV4 extends BaseContract {
 
   feeRecipient: TypedContractMethod<[], [string], "view">;
 
+  finalizeRefundTimeout: TypedContractMethod<
+    [auctionId: BigNumberish],
+    [void],
+    "nonpayable"
+  >;
+
   finalizeSettlement: TypedContractMethod<
     [auctionId: BigNumberish],
     [void],
@@ -806,6 +1083,8 @@ export interface VeilNFTV4 extends BaseContract {
     ],
     "view"
   >;
+
+  nftClaimant: TypedContractMethod<[arg0: BigNumberish], [string], "view">;
 
   onERC1155BatchReceived: TypedContractMethod<
     [
@@ -842,7 +1121,15 @@ export interface VeilNFTV4 extends BaseContract {
     "view"
   >;
 
+  owner: TypedContractMethod<[], [string], "view">;
+
   pendingRefunds: TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
+
+  refundRequestedAt: TypedContractMethod<
+    [arg0: BigNumberish],
+    [bigint],
+    "view"
+  >;
 
   requestRefund: TypedContractMethod<
     [auctionId: BigNumberish, evidenceHash: string],
@@ -864,6 +1151,18 @@ export interface VeilNFTV4 extends BaseContract {
 
   reviewer: TypedContractMethod<[], [string], "view">;
 
+  setFeeRecipient: TypedContractMethod<
+    [newFeeRecipient: AddressLike],
+    [void],
+    "nonpayable"
+  >;
+
+  setReviewer: TypedContractMethod<
+    [newReviewer: AddressLike],
+    [void],
+    "nonpayable"
+  >;
+
   settleAuction: TypedContractMethod<
     [auctionId: BigNumberish],
     [void],
@@ -876,6 +1175,12 @@ export interface VeilNFTV4 extends BaseContract {
     "view"
   >;
 
+  transferOwnership: TypedContractMethod<
+    [newOwner: AddressLike],
+    [void],
+    "nonpayable"
+  >;
+
   withdrawRefund: TypedContractMethod<[], [void], "nonpayable">;
 
   getFunction<T extends ContractMethod = ContractMethod>(
@@ -886,7 +1191,19 @@ export interface VeilNFTV4 extends BaseContract {
     nameOrSignature: "BPS_DENOMINATOR"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
+    nameOrSignature: "MAX_BIDDERS_PER_AUCTION"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "NFT_TRANSFER_GAS"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "NON_REVEAL_PENALTY_PERCENT"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
     nameOrSignature: "PLATFORM_FEE_BPS"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "REVIEW_TIMEOUT"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
     nameOrSignature: "acceptDataset"
@@ -947,6 +1264,16 @@ export interface VeilNFTV4 extends BaseContract {
       }
     ],
     "view"
+  >;
+  getFunction(
+    nameOrSignature: "cancelAuction"
+  ): TypedContractMethod<[auctionId: BigNumberish], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "claimNft"
+  ): TypedContractMethod<
+    [auctionId: BigNumberish, to: AddressLike],
+    [void],
+    "nonpayable"
   >;
   getFunction(
     nameOrSignature: "commitBid"
@@ -1019,6 +1346,9 @@ export interface VeilNFTV4 extends BaseContract {
     nameOrSignature: "feeRecipient"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
+    nameOrSignature: "finalizeRefundTimeout"
+  ): TypedContractMethod<[auctionId: BigNumberish], [void], "nonpayable">;
+  getFunction(
     nameOrSignature: "finalizeSettlement"
   ): TypedContractMethod<[auctionId: BigNumberish], [void], "nonpayable">;
   getFunction(
@@ -1043,6 +1373,9 @@ export interface VeilNFTV4 extends BaseContract {
     ],
     "view"
   >;
+  getFunction(
+    nameOrSignature: "nftClaimant"
+  ): TypedContractMethod<[arg0: BigNumberish], [string], "view">;
   getFunction(
     nameOrSignature: "onERC1155BatchReceived"
   ): TypedContractMethod<
@@ -1082,8 +1415,14 @@ export interface VeilNFTV4 extends BaseContract {
     "view"
   >;
   getFunction(
+    nameOrSignature: "owner"
+  ): TypedContractMethod<[], [string], "view">;
+  getFunction(
     nameOrSignature: "pendingRefunds"
   ): TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "refundRequestedAt"
+  ): TypedContractMethod<[arg0: BigNumberish], [bigint], "view">;
   getFunction(
     nameOrSignature: "requestRefund"
   ): TypedContractMethod<
@@ -1109,15 +1448,31 @@ export interface VeilNFTV4 extends BaseContract {
     nameOrSignature: "reviewer"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
+    nameOrSignature: "setFeeRecipient"
+  ): TypedContractMethod<[newFeeRecipient: AddressLike], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "setReviewer"
+  ): TypedContractMethod<[newReviewer: AddressLike], [void], "nonpayable">;
+  getFunction(
     nameOrSignature: "settleAuction"
   ): TypedContractMethod<[auctionId: BigNumberish], [void], "nonpayable">;
   getFunction(
     nameOrSignature: "supportsInterface"
   ): TypedContractMethod<[interfaceId: BytesLike], [boolean], "view">;
   getFunction(
+    nameOrSignature: "transferOwnership"
+  ): TypedContractMethod<[newOwner: AddressLike], [void], "nonpayable">;
+  getFunction(
     nameOrSignature: "withdrawRefund"
   ): TypedContractMethod<[], [void], "nonpayable">;
 
+  getEvent(
+    key: "AuctionCancelled"
+  ): TypedContractEvent<
+    AuctionCancelledEvent.InputTuple,
+    AuctionCancelledEvent.OutputTuple,
+    AuctionCancelledEvent.OutputObject
+  >;
   getEvent(
     key: "AuctionCompleted"
   ): TypedContractEvent<
@@ -1161,6 +1516,20 @@ export interface VeilNFTV4 extends BaseContract {
     DatasetAcceptedEvent.OutputObject
   >;
   getEvent(
+    key: "FeeRecipientUpdated"
+  ): TypedContractEvent<
+    FeeRecipientUpdatedEvent.InputTuple,
+    FeeRecipientUpdatedEvent.OutputTuple,
+    FeeRecipientUpdatedEvent.OutputObject
+  >;
+  getEvent(
+    key: "NftClaimed"
+  ): TypedContractEvent<
+    NftClaimedEvent.InputTuple,
+    NftClaimedEvent.OutputTuple,
+    NftClaimedEvent.OutputObject
+  >;
+  getEvent(
     key: "NftDelivered"
   ): TypedContractEvent<
     NftDeliveredEvent.InputTuple,
@@ -1180,6 +1549,27 @@ export interface VeilNFTV4 extends BaseContract {
     NftReturnedEvent.InputTuple,
     NftReturnedEvent.OutputTuple,
     NftReturnedEvent.OutputObject
+  >;
+  getEvent(
+    key: "NftTransferFailed"
+  ): TypedContractEvent<
+    NftTransferFailedEvent.InputTuple,
+    NftTransferFailedEvent.OutputTuple,
+    NftTransferFailedEvent.OutputObject
+  >;
+  getEvent(
+    key: "NonRevealPenaltyCollected"
+  ): TypedContractEvent<
+    NonRevealPenaltyCollectedEvent.InputTuple,
+    NonRevealPenaltyCollectedEvent.OutputTuple,
+    NonRevealPenaltyCollectedEvent.OutputObject
+  >;
+  getEvent(
+    key: "OwnershipTransferred"
+  ): TypedContractEvent<
+    OwnershipTransferredEvent.InputTuple,
+    OwnershipTransferredEvent.OutputTuple,
+    OwnershipTransferredEvent.OutputObject
   >;
   getEvent(
     key: "RefundAvailable"
@@ -1209,8 +1599,33 @@ export interface VeilNFTV4 extends BaseContract {
     RefundResolvedEvent.OutputTuple,
     RefundResolvedEvent.OutputObject
   >;
+  getEvent(
+    key: "RefundReviewTimedOut"
+  ): TypedContractEvent<
+    RefundReviewTimedOutEvent.InputTuple,
+    RefundReviewTimedOutEvent.OutputTuple,
+    RefundReviewTimedOutEvent.OutputObject
+  >;
+  getEvent(
+    key: "ReviewerUpdated"
+  ): TypedContractEvent<
+    ReviewerUpdatedEvent.InputTuple,
+    ReviewerUpdatedEvent.OutputTuple,
+    ReviewerUpdatedEvent.OutputObject
+  >;
 
   filters: {
+    "AuctionCancelled(uint256,address)": TypedContractEvent<
+      AuctionCancelledEvent.InputTuple,
+      AuctionCancelledEvent.OutputTuple,
+      AuctionCancelledEvent.OutputObject
+    >;
+    AuctionCancelled: TypedContractEvent<
+      AuctionCancelledEvent.InputTuple,
+      AuctionCancelledEvent.OutputTuple,
+      AuctionCancelledEvent.OutputObject
+    >;
+
     "AuctionCompleted(uint256,address,uint256,uint256)": TypedContractEvent<
       AuctionCompletedEvent.InputTuple,
       AuctionCompletedEvent.OutputTuple,
@@ -1277,6 +1692,28 @@ export interface VeilNFTV4 extends BaseContract {
       DatasetAcceptedEvent.OutputObject
     >;
 
+    "FeeRecipientUpdated(address,address)": TypedContractEvent<
+      FeeRecipientUpdatedEvent.InputTuple,
+      FeeRecipientUpdatedEvent.OutputTuple,
+      FeeRecipientUpdatedEvent.OutputObject
+    >;
+    FeeRecipientUpdated: TypedContractEvent<
+      FeeRecipientUpdatedEvent.InputTuple,
+      FeeRecipientUpdatedEvent.OutputTuple,
+      FeeRecipientUpdatedEvent.OutputObject
+    >;
+
+    "NftClaimed(uint256,address,address)": TypedContractEvent<
+      NftClaimedEvent.InputTuple,
+      NftClaimedEvent.OutputTuple,
+      NftClaimedEvent.OutputObject
+    >;
+    NftClaimed: TypedContractEvent<
+      NftClaimedEvent.InputTuple,
+      NftClaimedEvent.OutputTuple,
+      NftClaimedEvent.OutputObject
+    >;
+
     "NftDelivered(uint256,address,address,uint256,uint256)": TypedContractEvent<
       NftDeliveredEvent.InputTuple,
       NftDeliveredEvent.OutputTuple,
@@ -1308,6 +1745,39 @@ export interface VeilNFTV4 extends BaseContract {
       NftReturnedEvent.InputTuple,
       NftReturnedEvent.OutputTuple,
       NftReturnedEvent.OutputObject
+    >;
+
+    "NftTransferFailed(uint256,address)": TypedContractEvent<
+      NftTransferFailedEvent.InputTuple,
+      NftTransferFailedEvent.OutputTuple,
+      NftTransferFailedEvent.OutputObject
+    >;
+    NftTransferFailed: TypedContractEvent<
+      NftTransferFailedEvent.InputTuple,
+      NftTransferFailedEvent.OutputTuple,
+      NftTransferFailedEvent.OutputObject
+    >;
+
+    "NonRevealPenaltyCollected(uint256,address,uint256)": TypedContractEvent<
+      NonRevealPenaltyCollectedEvent.InputTuple,
+      NonRevealPenaltyCollectedEvent.OutputTuple,
+      NonRevealPenaltyCollectedEvent.OutputObject
+    >;
+    NonRevealPenaltyCollected: TypedContractEvent<
+      NonRevealPenaltyCollectedEvent.InputTuple,
+      NonRevealPenaltyCollectedEvent.OutputTuple,
+      NonRevealPenaltyCollectedEvent.OutputObject
+    >;
+
+    "OwnershipTransferred(address,address)": TypedContractEvent<
+      OwnershipTransferredEvent.InputTuple,
+      OwnershipTransferredEvent.OutputTuple,
+      OwnershipTransferredEvent.OutputObject
+    >;
+    OwnershipTransferred: TypedContractEvent<
+      OwnershipTransferredEvent.InputTuple,
+      OwnershipTransferredEvent.OutputTuple,
+      OwnershipTransferredEvent.OutputObject
     >;
 
     "RefundAvailable(address,uint256)": TypedContractEvent<
@@ -1352,6 +1822,28 @@ export interface VeilNFTV4 extends BaseContract {
       RefundResolvedEvent.InputTuple,
       RefundResolvedEvent.OutputTuple,
       RefundResolvedEvent.OutputObject
+    >;
+
+    "RefundReviewTimedOut(uint256,address,uint256)": TypedContractEvent<
+      RefundReviewTimedOutEvent.InputTuple,
+      RefundReviewTimedOutEvent.OutputTuple,
+      RefundReviewTimedOutEvent.OutputObject
+    >;
+    RefundReviewTimedOut: TypedContractEvent<
+      RefundReviewTimedOutEvent.InputTuple,
+      RefundReviewTimedOutEvent.OutputTuple,
+      RefundReviewTimedOutEvent.OutputObject
+    >;
+
+    "ReviewerUpdated(address,address)": TypedContractEvent<
+      ReviewerUpdatedEvent.InputTuple,
+      ReviewerUpdatedEvent.OutputTuple,
+      ReviewerUpdatedEvent.OutputObject
+    >;
+    ReviewerUpdated: TypedContractEvent<
+      ReviewerUpdatedEvent.InputTuple,
+      ReviewerUpdatedEvent.OutputTuple,
+      ReviewerUpdatedEvent.OutputObject
     >;
   };
 }

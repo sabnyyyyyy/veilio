@@ -1,6 +1,54 @@
 import fs from 'fs';
 import path from 'path';
 
+/**
+ * Canonical network identifiers for Services listings, payment requests and orders.
+ * The network of an order is fixed when the order is created from its payment request
+ * and must never be taken from a client request body afterwards.
+ */
+export type ServiceNetworkId = 'bnb:97' | 'base:84532' | 'solana:devnet';
+
+export const SERVICE_NETWORK_CURRENCY: Record<ServiceNetworkId, string> = {
+  'bnb:97': 'BNB',
+  'base:84532': 'ETH',
+  'solana:devnet': 'SOL',
+};
+
+/**
+ * Maps canonical ids and the legacy display labels stored by older payment requests
+ * ('Base Sepolia', 'Solana Devnet', 'BNB Smart Chain Testnet') to a canonical id.
+ */
+export function normalizeServiceNetwork(value: unknown): ServiceNetworkId | null {
+  if (value === 97 || value === 84532) return value === 97 ? 'bnb:97' : 'base:84532';
+  if (typeof value !== 'string') return null;
+  const v = value.trim().toLowerCase();
+  if (!v) return null;
+  if (v === 'bnb:97' || v === '97' || v === 'bnb' || v.includes('bnb') || v.includes('bsc')) return 'bnb:97';
+  if (v === 'base:84532' || v === '84532' || v === 'base' || v.includes('base')) return 'base:84532';
+  if (v === 'solana:devnet' || v === 'solana' || v.includes('solana')) return 'solana:devnet';
+  return null;
+}
+
+export function isServiceNetworkSolana(network: ServiceNetworkId): boolean {
+  return network === 'solana:devnet';
+}
+
+const EVM_ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/;
+
+/**
+ * Normalizes a wallet address per chain family: EVM (0x) addresses are case-insensitive
+ * and are lowercased; Solana base58 public keys are case-sensitive and kept verbatim.
+ */
+export function normalizeWalletAddress(address: string): string {
+  const trimmed = String(address || '').trim();
+  return EVM_ADDRESS_REGEX.test(trimmed) ? trimmed.toLowerCase() : trimmed;
+}
+
+export function sameWalletAddress(a: string | undefined | null, b: string | undefined | null): boolean {
+  if (!a || !b) return false;
+  return normalizeWalletAddress(a) === normalizeWalletAddress(b);
+}
+
 export interface ServiceListing {
   id: string;
   sellerId: string;
@@ -22,6 +70,8 @@ export interface ServiceListing {
   metadataHash?: string;
   metadataURI?: string;
   onChainServiceId?: string;
+  /** Network the listing is registered on. Legacy listings without it are BNB Testnet. */
+  network?: ServiceNetworkId;
   createdAt: number;
   updatedAt: number;
 }
@@ -107,6 +157,8 @@ export interface ServiceOrder {
   paymentStatus: OrderPaymentStatus;
   escrowReference?: string;
   escrowTxHash?: string;
+  /** Settlement network, copied from the payment request when the order is created. */
+  network?: ServiceNetworkId;
   createdAt: number;
   updatedAt: number;
 }
@@ -225,7 +277,10 @@ interface ServicesDatabase {
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
-const DB_FILE = path.join(DATA_DIR, 'db', 'services.json');
+// VEILIO_SERVICES_DB_FILE lets tests (or a mounted volume) point at an isolated file.
+const DB_FILE = process.env.VEILIO_SERVICES_DB_FILE
+  ? path.resolve(process.env.VEILIO_SERVICES_DB_FILE)
+  : path.join(DATA_DIR, 'db', 'services.json');
 
 /**
  * Production initial services list is empty by default.
@@ -257,7 +312,6 @@ export const TEST_FIXTURE_SERVICES: ServiceListing[] = [
 
 
 function ensureDb(): ServicesDatabase {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   const dbDir = path.dirname(DB_FILE);
   if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
@@ -310,13 +364,57 @@ function ensureDb(): ServicesDatabase {
   }
 }
 
+/**
+ * Persists the whole database. Errors are surfaced to the caller (and therefore to the
+ * API response) instead of being swallowed, so a route never reports success for a
+ * state change that was not stored. The write goes through a temp file + rename so a
+ * crash mid-write cannot leave a truncated JSON file behind.
+ */
 function writeDb(data: ServicesDatabase): void {
+  const dbDir = path.dirname(DB_FILE);
   try {
-    ensureDb();
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf8');
+    if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
+    const tmpFile = `${DB_FILE}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2), 'utf8');
+    fs.renameSync(tmpFile, DB_FILE);
   } catch (err) {
     console.error('[Services DB] Error writing db file:', err);
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`Services database write failed: ${reason}`);
   }
+}
+
+/**
+ * Appends a message to the given in-memory database object WITHOUT persisting it.
+ * Every operation that both changes state and posts a system message must use this on
+ * the same `db` object and then call writeDb(db) once; calling the persisting
+ * addServiceMessage() in the middle of an operation would be overwritten by the outer
+ * stale writeDb(db) (lost-write).
+ */
+function appendServiceMessage(
+  db: ServicesDatabase,
+  message: Omit<ServiceMessage, 'id' | 'createdAt'>
+): ServiceMessage {
+  const conversation = db.conversations[message.conversationId];
+  if (!conversation) throw new Error('Conversation not found');
+
+  const id = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const now = Date.now();
+  const newMsg: ServiceMessage = {
+    ...message,
+    id,
+    createdAt: now,
+  };
+
+  if (!db.messages[message.conversationId]) {
+    db.messages[message.conversationId] = [];
+  }
+  db.messages[message.conversationId].push(newMsg);
+
+  // Update conversation last message preview
+  conversation.lastMessageAt = now;
+  conversation.lastMessageText = message.content.slice(0, 120);
+  return newMsg;
 }
 
 // ==========================================
@@ -366,14 +464,28 @@ export function getServiceById(id: string): ServiceListing | null {
   return db.services[id] || null;
 }
 
-export function createService(input: Omit<ServiceListing, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): ServiceListing {
+/**
+ * Creates a listing. `createdAt` must be the exact value that was hashed into the
+ * on-chain metadata hash (see lib/serviceRegistry.ts); it is stored verbatim so later
+ * verification recomputes the same hash.
+ */
+export function createService(
+  input: Omit<ServiceListing, 'id' | 'createdAt' | 'updatedAt'> & { id?: string; createdAt?: number }
+): ServiceListing {
   const db = ensureDb();
   const id = input.id || `srv-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  if (db.services[id]) {
+    throw new Error(`Service ${id} already exists`);
+  }
   const now = Date.now();
+  const createdAt = Number.isSafeInteger(input.createdAt) && (input.createdAt as number) > 0
+    ? (input.createdAt as number)
+    : now;
   const newService: ServiceListing = {
     ...input,
     id,
-    createdAt: now,
+    sellerId: normalizeWalletAddress(input.sellerId),
+    createdAt,
     updatedAt: now,
   };
   db.services[id] = newService;
@@ -390,7 +502,7 @@ export function updateService(
   const current = db.services[id];
   if (!current) return null;
 
-  if (current.sellerId.toLowerCase() !== sellerAddress.toLowerCase()) {
+  if (!sameWalletAddress(current.sellerId, sellerAddress)) {
     throw new Error('Unauthorized: only the service seller can edit this listing');
   }
 
@@ -411,15 +523,15 @@ export function updateService(
 
 export function getOrCreateConversation(buyerAddress: string, sellerAddress: string, serviceId: string, serviceTitle: string): Conversation {
   const db = ensureDb();
-  const normalizedBuyer = buyerAddress.toLowerCase();
-  const normalizedSeller = sellerAddress.toLowerCase();
+  const normalizedBuyer = normalizeWalletAddress(buyerAddress);
+  const normalizedSeller = normalizeWalletAddress(sellerAddress);
 
   // Find existing conversation
   const existing = Object.values(db.conversations).find(
     (c) =>
       c.serviceId === serviceId &&
-      c.buyerId.toLowerCase() === normalizedBuyer &&
-      c.sellerId.toLowerCase() === normalizedSeller
+      sameWalletAddress(c.buyerId, normalizedBuyer) &&
+      sameWalletAddress(c.sellerId, normalizedSeller)
   );
 
   if (existing) return existing;
@@ -452,9 +564,8 @@ export function getConversationById(id: string): Conversation | null {
 
 export function getUserConversations(userAddress: string): Conversation[] {
   const db = ensureDb();
-  const addr = userAddress.toLowerCase();
   return Object.values(db.conversations)
-    .filter((c) => c.buyerId.toLowerCase() === addr || c.sellerId.toLowerCase() === addr)
+    .filter((c) => sameWalletAddress(c.buyerId, userAddress) || sameWalletAddress(c.sellerId, userAddress))
     .sort((a, b) => b.lastMessageAt - a.lastMessageAt);
 }
 
@@ -463,28 +574,13 @@ export function getConversationMessages(conversationId: string): ServiceMessage[
   return db.messages[conversationId] || [];
 }
 
+/**
+ * Standalone (persisting) message append. Only for callers that do not otherwise
+ * modify the database in the same operation (e.g. a plain chat message).
+ */
 export function addServiceMessage(message: Omit<ServiceMessage, 'id' | 'createdAt'>): ServiceMessage {
   const db = ensureDb();
-  const conversation = db.conversations[message.conversationId];
-  if (!conversation) throw new Error('Conversation not found');
-
-  const id = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-  const now = Date.now();
-  const newMsg: ServiceMessage = {
-    ...message,
-    id,
-    createdAt: now,
-  };
-
-  if (!db.messages[message.conversationId]) {
-    db.messages[message.conversationId] = [];
-  }
-  db.messages[message.conversationId].push(newMsg);
-
-  // Update conversation last message preview
-  conversation.lastMessageAt = now;
-  conversation.lastMessageText = message.content.slice(0, 120);
-
+  const newMsg = appendServiceMessage(db, message);
   writeDb(db);
   return newMsg;
 }
@@ -498,8 +594,14 @@ export function createPaymentRequest(input: Omit<PaymentRequest, 'id' | 'status'
   const id = `pr-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   const now = Date.now();
 
+  if (!db.conversations[input.conversationId]) {
+    throw new Error('Conversation not found');
+  }
+
   const pr: PaymentRequest = {
     ...input,
+    buyerId: normalizeWalletAddress(input.buyerId),
+    sellerId: normalizeWalletAddress(input.sellerId),
     id,
     status: 'pending',
     createdAt: now,
@@ -507,8 +609,8 @@ export function createPaymentRequest(input: Omit<PaymentRequest, 'id' | 'status'
 
   db.paymentRequests[id] = pr;
 
-  // Append a structured message into the conversation
-  addServiceMessage({
+  // Append a structured message into the conversation (same db object, single write)
+  appendServiceMessage(db, {
     conversationId: input.conversationId,
     senderId: input.sellerId,
     senderType: 'human',
@@ -552,9 +654,15 @@ export function createOrderFromPaymentRequest(paymentRequestId: string, buyerAdd
     throw new Error(`Payment request is already ${pr.status}`);
   }
 
-  if (pr.buyerId.toLowerCase() !== buyerAddress.toLowerCase()) {
+  if (!sameWalletAddress(pr.buyerId, buyerAddress)) {
     throw new Error('Unauthorized: only designated buyer can accept this payment request');
   }
+
+  if (pr.expiresAt && Date.now() > pr.expiresAt) {
+    throw new Error('Payment request has expired; ask the seller to issue a new one');
+  }
+
+  const network = normalizeServiceNetwork(pr.network) || networkFromCurrency(pr.currency);
 
   // Prevent duplicate order creation if an order already exists for this payment request
   const existingOrder = Object.values(db.orders).find((o) => o.paymentRequestId === paymentRequestId);
@@ -571,8 +679,8 @@ export function createOrderFromPaymentRequest(paymentRequestId: string, buyerAdd
     id: orderId,
     serviceId: pr.serviceId,
     paymentRequestId: pr.id,
-    buyerId: pr.buyerId.toLowerCase(),
-    sellerId: pr.sellerId.toLowerCase(),
+    buyerId: normalizeWalletAddress(pr.buyerId),
+    sellerId: normalizeWalletAddress(pr.sellerId),
     conversationId: pr.conversationId,
     serviceTitle: service?.title || 'Custom Service Order',
     scopeSnapshot: pr.scope,
@@ -581,6 +689,7 @@ export function createOrderFromPaymentRequest(paymentRequestId: string, buyerAdd
     deadline: pr.deadline,
     status: 'AwaitingPayment',
     paymentStatus: 'NotPaid',
+    network,
     createdAt: now,
     updatedAt: now,
   };
@@ -588,7 +697,7 @@ export function createOrderFromPaymentRequest(paymentRequestId: string, buyerAdd
   db.orders[orderId] = order;
   pr.status = 'accepted';
 
-  addServiceMessage({
+  appendServiceMessage(db, {
     conversationId: pr.conversationId,
     senderId: buyerAddress,
     senderType: 'human',
@@ -604,14 +713,90 @@ export function getOrderById(id: string): ServiceOrder | null {
   return db.orders[id] || null;
 }
 
+function networkFromCurrency(currency: string | undefined): ServiceNetworkId {
+  const c = String(currency || '').toUpperCase();
+  if (c === 'ETH') return 'base:84532';
+  if (c === 'SOL') return 'solana:devnet';
+  return 'bnb:97';
+}
+
+/**
+ * Server-authoritative settlement network of an order: the stored order.network, else
+ * the network of its payment request, else (legacy rows) derived from the currency.
+ * Routes must use this and reject a request body whose `network` disagrees.
+ */
+export function getOrderNetwork(order: ServiceOrder): ServiceNetworkId {
+  const stored = normalizeServiceNetwork(order.network);
+  if (stored) return stored;
+  if (order.paymentRequestId) {
+    const pr = getPaymentRequest(order.paymentRequestId);
+    const fromPr = pr ? normalizeServiceNetwork(pr.network) : null;
+    if (fromPr) return fromPr;
+  }
+  return networkFromCurrency(order.currency);
+}
+
 export function getUserOrders(userAddress: string): { asBuyer: ServiceOrder[]; asSeller: ServiceOrder[] } {
   const db = ensureDb();
-  const addr = userAddress.toLowerCase();
   const all = Object.values(db.orders);
   return {
-    asBuyer: all.filter((o) => o.buyerId === addr).sort((a, b) => b.createdAt - a.createdAt),
-    asSeller: all.filter((o) => o.sellerId === addr).sort((a, b) => b.createdAt - a.createdAt),
+    asBuyer: all.filter((o) => sameWalletAddress(o.buyerId, userAddress)).sort((a, b) => b.createdAt - a.createdAt),
+    asSeller: all.filter((o) => sameWalletAddress(o.sellerId, userAddress)).sort((a, b) => b.createdAt - a.createdAt),
   };
+}
+
+/** Statuses in which escrow funds are locked on-chain and not under dispute. */
+export const FUNDED_ACTIVE_ORDER_STATUSES: OrderStatus[] = ['Funded', 'InProgress', 'InReview', 'RevisionRequested'];
+
+export class OrderStateConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'OrderStateConflictError';
+  }
+}
+
+/**
+ * Atomically (single read-modify-write) moves an order to a new status, but only if it
+ * is currently in one of `from`. Optionally syncs the payment request status and posts a
+ * system message in the same write. Throws OrderStateConflictError on a bad transition.
+ */
+export function transitionOrderStatus(params: {
+  orderId: string;
+  from: OrderStatus[];
+  to: OrderStatus;
+  paymentStatus?: OrderPaymentStatus;
+  escrowReference?: string;
+  txHash?: string;
+  paymentRequestStatus?: PaymentRequest['status'];
+  message?: Omit<ServiceMessage, 'id' | 'createdAt' | 'conversationId'>;
+}): ServiceOrder {
+  const db = ensureDb();
+  const order = db.orders[params.orderId];
+  if (!order) throw new Error('Order not found');
+
+  if (!params.from.includes(order.status)) {
+    throw new OrderStateConflictError(
+      `Invalid order state transition: '${order.status}' -> '${params.to}' (allowed from: ${params.from.join(', ')})`
+    );
+  }
+
+  order.status = params.to;
+  if (params.paymentStatus) order.paymentStatus = params.paymentStatus;
+  if (params.escrowReference) order.escrowReference = params.escrowReference;
+  if (params.txHash) order.escrowTxHash = params.txHash;
+  order.updatedAt = Date.now();
+
+  if (params.paymentRequestStatus && order.paymentRequestId) {
+    const pr = db.paymentRequests[order.paymentRequestId];
+    if (pr) pr.status = params.paymentRequestStatus;
+  }
+
+  if (params.message) {
+    appendServiceMessage(db, { ...params.message, conversationId: order.conversationId });
+  }
+
+  writeDb(db);
+  return order;
 }
 
 export function updateOrderStatus(
@@ -646,15 +831,24 @@ export function addOrderSubmission(
   const order = db.orders[orderId];
   if (!order) throw new Error('Order not found');
 
-  if (order.sellerId.toLowerCase() !== submittedBy.toLowerCase()) {
+  if (!sameWalletAddress(order.sellerId, submittedBy)) {
     throw new Error('Unauthorized: only seller can submit deliverables');
+  }
+
+  // Deliverables can only be submitted (or re-submitted) while escrow is funded and the
+  // order is not disputed / settled.
+  const submittable: OrderStatus[] = ['Funded', 'InProgress', 'RevisionRequested', 'InReview'];
+  if (!submittable.includes(order.status) || order.paymentStatus !== 'Funded') {
+    throw new OrderStateConflictError(
+      `Cannot submit deliverables while order is '${order.status}' (payment: ${order.paymentStatus})`
+    );
   }
 
   const subId = `sub-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   const submission: OrderSubmission = {
     id: subId,
     orderId,
-    submittedBy: submittedBy.toLowerCase(),
+    submittedBy: normalizeWalletAddress(submittedBy),
     description,
     deliverableReferences,
     submittedAt: Date.now(),
@@ -666,7 +860,7 @@ export function addOrderSubmission(
   order.status = 'InReview';
   order.updatedAt = Date.now();
 
-  addServiceMessage({
+  appendServiceMessage(db, {
     conversationId: order.conversationId,
     senderId: submittedBy,
     senderType: 'human',
@@ -688,8 +882,15 @@ export function addOrderRevision(orderId: string, buyerAddress: string, feedback
   const order = db.orders[orderId];
   if (!order) throw new Error('Order not found');
 
-  if (order.buyerId.toLowerCase() !== buyerAddress.toLowerCase()) {
+  if (!sameWalletAddress(order.buyerId, buyerAddress)) {
     throw new Error('Unauthorized: only buyer can request revision');
+  }
+
+  // A revision can only be requested on submitted work that is under review.
+  if (order.status !== 'InReview') {
+    throw new OrderStateConflictError(
+      `Cannot request a revision while order is '${order.status}' (expected 'InReview')`
+    );
   }
 
   const revId = `rev-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
@@ -706,7 +907,7 @@ export function addOrderRevision(orderId: string, buyerAddress: string, feedback
   order.status = 'RevisionRequested';
   order.updatedAt = Date.now();
 
-  addServiceMessage({
+  appendServiceMessage(db, {
     conversationId: order.conversationId,
     senderId: buyerAddress,
     senderType: 'human',
@@ -741,8 +942,8 @@ export function createServiceDispute(params: {
     throw new Error('Order not found');
   }
 
-  const isBuyer = order.buyerId.toLowerCase() === params.initiatorAddress.toLowerCase();
-  const isSeller = order.sellerId.toLowerCase() === params.initiatorAddress.toLowerCase();
+  const isBuyer = sameWalletAddress(order.buyerId, params.initiatorAddress);
+  const isSeller = sameWalletAddress(order.sellerId, params.initiatorAddress);
   if (!isBuyer && !isSeller) {
     throw new Error('Unauthorized: only the buyer or seller can dispute this order');
   }
@@ -768,7 +969,7 @@ export function createServiceDispute(params: {
     {
       id: `ev-${Date.now()}-init`,
       disputeId,
-      submittedBy: params.initiatorAddress.toLowerCase(),
+      submittedBy: normalizeWalletAddress(params.initiatorAddress),
       partyRole: role,
       evidenceType: 'claim',
       title: params.evidenceTitle || `Initial Dispute Claim by ${role.toUpperCase()}`,
@@ -781,7 +982,7 @@ export function createServiceDispute(params: {
   const dispute: ServiceDispute = {
     id: disputeId,
     orderId: params.orderId,
-    initiatorAddress: params.initiatorAddress.toLowerCase(),
+    initiatorAddress: normalizeWalletAddress(params.initiatorAddress),
     initiatorRole: role,
     reason: params.reason,
     status: 'initiated',
@@ -801,7 +1002,7 @@ export function createServiceDispute(params: {
   order.paymentStatus = 'Disputed';
   order.updatedAt = Date.now();
 
-  addServiceMessage({
+  appendServiceMessage(db, {
     conversationId: order.conversationId,
     senderId: params.initiatorAddress,
     senderType: 'human',
@@ -847,15 +1048,15 @@ export function addDisputeEvidence(params: {
     throw new Error('Associated order not found');
   }
 
-  const subAddr = params.submittedBy.toLowerCase();
+  const subAddr = normalizeWalletAddress(params.submittedBy);
   let partyRole: 'buyer' | 'seller' | 'reviewer' | 'system' = 'system';
-  if (subAddr === order.buyerId.toLowerCase()) {
+  if (sameWalletAddress(subAddr, order.buyerId)) {
     partyRole = 'buyer';
-  } else if (subAddr === order.sellerId.toLowerCase()) {
+  } else if (sameWalletAddress(subAddr, order.sellerId)) {
     partyRole = 'seller';
   } else if (
-    process.env.REVIEWER_ADDRESS &&
-    subAddr === process.env.REVIEWER_ADDRESS.toLowerCase()
+    sameWalletAddress(subAddr, process.env.REVIEWER_ADDRESS) ||
+    sameWalletAddress(subAddr, process.env.NEXT_PUBLIC_SOLANA_SERVICE_REVIEWER)
   ) {
     partyRole = 'reviewer';
   } else {
@@ -881,7 +1082,7 @@ export function addDisputeEvidence(params: {
   }
   dispute.updatedAt = Date.now();
 
-  addServiceMessage({
+  appendServiceMessage(db, {
     conversationId: order.conversationId,
     senderId: params.submittedBy,
     senderType: 'human',
@@ -908,7 +1109,7 @@ export function saveDisputeRecommendation(
 
   const order = db.orders[dispute.orderId];
   if (order) {
-    addServiceMessage({
+    appendServiceMessage(db, {
       conversationId: order.conversationId,
       senderId: 'ai-evaluator',
       senderType: 'agent',
@@ -944,8 +1145,14 @@ export function recordReviewerDecision(params: {
     throw new Error('Associated order not found');
   }
 
+  if (params.settlementTxHash && (order.status !== 'Disputed' || dispute.status === 'resolved')) {
+    throw new OrderStateConflictError(
+      `Cannot settle dispute: order is '${order.status}' and dispute is '${dispute.status}'`
+    );
+  }
+
   const decision: DisputeReviewDecision = {
-    reviewerAddress: params.reviewerAddress.toLowerCase(),
+    reviewerAddress: normalizeWalletAddress(params.reviewerAddress),
     decision: params.decision,
     buyerRefundPercent: params.buyerRefundPercent,
     sellerGrossAwardPercent: params.sellerGrossAwardPercent,
@@ -964,7 +1171,7 @@ export function recordReviewerDecision(params: {
     order.escrowTxHash = params.settlementTxHash;
     order.updatedAt = Date.now();
 
-    addServiceMessage({
+    appendServiceMessage(db, {
       conversationId: order.conversationId,
       senderId: params.reviewerAddress,
       senderType: 'human',

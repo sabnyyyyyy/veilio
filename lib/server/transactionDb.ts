@@ -3,6 +3,7 @@ import path from 'path';
 import { saveRefundEvidence, type RefundEvidence } from './refundDb';
 import { computeCanonicalEvidenceHash, type CanonicalEvidencePackage } from './evidenceHash';
 import type { GeminiValidationOutput } from './gemini';
+import { DEFAULT_AUCTION_NETWORK, scopedAuctionKey, type AuctionNetworkId } from '../auctionNetwork';
 
 export interface TransactionRecord {
   id: string; // Typically auctionId as string
@@ -56,6 +57,8 @@ export interface TransactionMessage {
 export interface DisputeRecord {
   id: string;
   transactionId: string;
+  /** Missing on legacy records: those are BNB (`bnb:97`). */
+  networkId?: AuctionNetworkId;
   auctionId: string;
   openedBy: string;
   issueCategory: string;
@@ -223,14 +226,17 @@ export function submitDispute(
     evidenceReferences?: string[];
     requestedResolution?: string;
     aiAssessment?: GeminiValidationOutput;
-  }
+  },
+  networkId: AuctionNetworkId = DEFAULT_AUCTION_NETWORK
 ): DisputeRecord {
   const db = readDb();
   const now = Date.now();
   const evidenceReferences = payload.evidenceReferences || [];
+  // Auction IDs are only unique per network; BNB keeps the bare legacy key.
+  const key = scopedAuctionKey(networkId, auctionId);
 
   const evidencePkg: CanonicalEvidencePackage = {
-    auctionId,
+    auctionId: key,
     buyerAddress: payload.buyerAddress,
     sellerAddress: payload.sellerAddress,
     issueCategory: payload.issueCategory,
@@ -245,10 +251,11 @@ export function submitDispute(
   const evidenceHash = computeCanonicalEvidenceHash(evidencePkg);
 
   const dispute: DisputeRecord = {
-    id: `dispute-${auctionId}-${now}`,
-    transactionId: auctionId,
+    id: `dispute-${key}-${now}`,
+    transactionId: key,
+    networkId,
     auctionId,
-    openedBy: payload.buyerAddress.toLowerCase(),
+    openedBy: networkId === 'solana:devnet' ? payload.buyerAddress : payload.buyerAddress.toLowerCase(),
     issueCategory: payload.issueCategory,
     expectedCondition: payload.expectedCondition,
     actualCondition: payload.actualCondition,
@@ -261,13 +268,13 @@ export function submitDispute(
     createdAt: now,
   };
 
-  db.disputes[auctionId] = dispute;
+  db.disputes[key] = dispute;
 
   // Update transaction status
-  if (db.transactions[auctionId]) {
-    db.transactions[auctionId].disputeStatus = 'submitted';
-    db.transactions[auctionId].deliveryStatus = 'delivery_disputed';
-    db.transactions[auctionId].updatedAt = now;
+  if (db.transactions[key]) {
+    db.transactions[key].disputeStatus = 'submitted';
+    db.transactions[key].deliveryStatus = 'delivery_disputed';
+    db.transactions[key].updatedAt = now;
   }
 
   writeDb(db);
@@ -275,6 +282,7 @@ export function submitDispute(
   // Sync to refundDb for backwards-compatibility with Reviewer dashboard
   saveRefundEvidence({
     auctionId,
+    networkId,
     buyer: payload.buyerAddress,
     disputedCriterion: payload.issueCategory,
     expectedValue: payload.expectedCondition,
@@ -287,9 +295,9 @@ export function submitDispute(
   return dispute;
 }
 
-export function getDispute(auctionId: string): DisputeRecord | null {
+export function getDispute(auctionId: string, networkId: AuctionNetworkId = DEFAULT_AUCTION_NETWORK): DisputeRecord | null {
   const db = readDb();
-  return db.disputes[auctionId] || null;
+  return db.disputes[scopedAuctionKey(networkId, auctionId)] || null;
 }
 
 export function respondToDispute(
@@ -297,10 +305,12 @@ export function respondToDispute(
   response: {
     statement: string;
     evidenceReferences?: string[];
-  }
+  },
+  networkId: AuctionNetworkId = DEFAULT_AUCTION_NETWORK
 ): DisputeRecord | null {
   const db = readDb();
-  const dispute = db.disputes[auctionId];
+  const key = scopedAuctionKey(networkId, auctionId);
+  const dispute = db.disputes[key];
   if (!dispute) return null;
 
   dispute.sellerResponse = {
@@ -310,9 +320,9 @@ export function respondToDispute(
   };
   dispute.status = 'under_review';
 
-  if (db.transactions[auctionId]) {
-    db.transactions[auctionId].disputeStatus = 'under_review';
-    db.transactions[auctionId].updatedAt = Date.now();
+  if (db.transactions[key]) {
+    db.transactions[key].disputeStatus = 'under_review';
+    db.transactions[key].updatedAt = Date.now();
   }
 
   writeDb(db);

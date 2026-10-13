@@ -19,12 +19,12 @@ import type { ServiceListing } from '@/lib/server/servicesDb';
 import { createServiceAuthMessage, generateAuthNonce } from '@/lib/serviceAuth';
 import {
   VEIL_SERVICE_REGISTRY_ABI,
-  VEIL_SERVICE_REGISTRY_CONTRACT_ADDRESS,
+  getServiceRegistryAddress,
 } from '@/lib/serviceContract';
 import { formatServiceRegistryId } from '@/lib/serviceRegistry';
 
 export default function MyServicesPage() {
-  const { address } = useAccount();
+  const { address, chainId } = useAccount();
   const { signMessageAsync } = useSignMessage();
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
@@ -80,11 +80,15 @@ export default function MyServicesPage() {
       const signature = await signMessageAsync({ message: authMessage });
 
       let onChainTx: `0x${string}` | undefined;
-      // If listing was registered on-chain, update on-chain status
+      // If listing was registered on-chain, update on-chain status on the listing's chain
       if (service.onChainRegistered) {
+        const listingChainId = service.network === 'base:84532' ? 84532 : 97;
+        if (chainId !== listingChainId) {
+          throw new Error(`Switch your wallet to ${listingChainId === 84532 ? 'Base Sepolia (84532)' : 'BNB Chain Testnet (97)'} to update this listing.`);
+        }
         const serviceIdBytes32 = formatServiceRegistryId(service.id);
         onChainTx = await writeContractAsync({
-          address: VEIL_SERVICE_REGISTRY_CONTRACT_ADDRESS,
+          address: getServiceRegistryAddress(listingChainId),
           abi: VEIL_SERVICE_REGISTRY_ABI,
           functionName: 'setServiceStatus',
           args: [serviceIdBytes32, nextActiveBool],
