@@ -3,10 +3,16 @@ import path from 'path';
 import crypto from 'crypto';
 import { decryptDatabase, encryptDatabase, parseAssetMasterKey, type EncryptedDatabase } from './datasetVault';
 import { assetRedisCommand, isAssetRedisConfigured } from './redisRest';
+import { DEFAULT_AUCTION_NETWORK, scopedAuctionKey, type AuctionNetworkId } from '../auctionNetwork';
 
 export interface DatasetRecord {
   datasetId: string;
   auctionId?: string;
+  /**
+   * Network of the linked auction. Records linked before multi-chain support
+   * have no value and are BNB Testnet (`bnb:97`) auctions.
+   */
+  networkId?: AuctionNetworkId;
   uploader?: string;
   uploadNonce?: string;
   assetType?: 'dataset' | 'ai-model' | 'data-license' | 'api-license' | 'software-license' | 'nft' | 'digital-asset' | '3d-asset' | 'digital-media';
@@ -220,35 +226,58 @@ export async function updateDatasetRecord(record: DatasetRecord) {
   writeDb(database);
 }
 
-export async function linkAuctionToDataset(datasetId: string, auctionId: string) {
+/** Network of a record's linked auction (legacy records without a network are BNB). */
+export function datasetRecordNetwork(record: Pick<DatasetRecord, 'networkId'>): AuctionNetworkId {
+  return record.networkId || DEFAULT_AUCTION_NETWORK;
+}
+
+/** True when the record is linked to exactly this (network, auction ID). */
+export function isDatasetLinkedTo(record: Pick<DatasetRecord, 'auctionId' | 'networkId'>, auctionId: string, networkId: AuctionNetworkId = DEFAULT_AUCTION_NETWORK): boolean {
+  return !!record.auctionId && record.auctionId === auctionId && datasetRecordNetwork(record) === networkId;
+}
+
+/**
+ * Links an uploaded asset to an auction on a specific network. Auction IDs are
+ * only unique per network (BNB #5 != Base #5), so the auction index key is
+ * `networkId:auctionId`, except BNB which keeps the bare legacy key.
+ */
+export async function linkAuctionToDataset(datasetId: string, auctionId: string, networkId: AuctionNetworkId = DEFAULT_AUCTION_NETWORK) {
+  const scopedKey = scopedAuctionKey(networkId, auctionId);
   if (isAssetRedisConfigured()) {
     const record = await getDatasetRecord(datasetId);
     if (!record) return;
-    if (record.auctionId && record.auctionId !== auctionId) throw new Error('Asset is already linked to another auction.');
+    if (record.auctionId && !isDatasetLinkedTo(record, auctionId, networkId)) throw new Error('Asset is already linked to another auction.');
     record.auctionId = auctionId;
+    record.networkId = networkId;
     const result = await assetRedisCommand<number>([
       'EVAL', LINK_ASSET_SCRIPT, '3',
-      redisRecordKey(datasetId), redisAuctionKey(auctionId), `${REDIS_DATASET_LINK_PREFIX}${datasetId}`,
-      datasetId, auctionId, encryptStoredJson(record),
+      redisRecordKey(datasetId), redisAuctionKey(scopedKey), `${REDIS_DATASET_LINK_PREFIX}${datasetId}`,
+      datasetId, scopedKey, encryptStoredJson(record),
     ]);
     if (Number(result) === -1) throw new Error('Uploaded asset record no longer exists.');
     if (Number(result) !== 1) throw new Error('Auction or asset is already linked to a different record.');
     return;
   }
   const database = readDb();
-  if (database.records[datasetId]) {
-    database.records[datasetId].auctionId = auctionId;
-    writeDb(database);
-  }
+  const record = database.records[datasetId];
+  if (!record) return;
+  if (record.auctionId && !isDatasetLinkedTo(record, auctionId, networkId)) throw new Error('Asset is already linked to another auction.');
+  const existing = Object.values(database.records).find((candidate) => candidate.datasetId !== datasetId && isDatasetLinkedTo(candidate, auctionId, networkId));
+  if (existing) throw new Error('Auction or asset is already linked to a different record.');
+  record.auctionId = auctionId;
+  record.networkId = networkId;
+  writeDb(database);
 }
 
-export async function getDatasetRecordByAuctionId(auctionId: string): Promise<DatasetRecord | null> {
+export async function getDatasetRecordByAuctionId(auctionId: string, networkId: AuctionNetworkId = DEFAULT_AUCTION_NETWORK): Promise<DatasetRecord | null> {
   if (isAssetRedisConfigured()) {
-    const datasetId = await assetRedisCommand<string | null>(['GET', redisAuctionKey(auctionId)]);
-    return datasetId ? getDatasetRecord(datasetId) : null;
+    const datasetId = await assetRedisCommand<string | null>(['GET', redisAuctionKey(scopedAuctionKey(networkId, auctionId))]);
+    if (!datasetId) return null;
+    const record = await getDatasetRecord(datasetId);
+    return record && isDatasetLinkedTo(record, auctionId, networkId) ? record : null;
   }
   const database = readDb();
-  return Object.values(database.records).find((record) => record.auctionId === auctionId) || null;
+  return Object.values(database.records).find((record) => isDatasetLinkedTo(record, auctionId, networkId)) || null;
 }
 
 /** Consume a signed upload nonce once; the nonce table is encrypted with the asset database. */

@@ -2,25 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { get as getBlob } from '@vercel/blob';
-import { verifyMessage, createPublicClient, http, isAddress } from 'viem';
-import { bnbChain } from '@/lib/chain';
-import { VEIL_V3_CONTRACT_ADDRESS, VEIL_V3_ABI } from '@/lib/contract';
 import { getDatasetRecordByAuctionId, getEncryptedFilePath } from '@/lib/server/datasetDb';
-import { datasetDownloadMessage } from '@/lib/assetAuth';
+import { datasetDownloadMessageFor, isValidAuctionIdForNetwork, parseAuctionNetwork, sameWallet } from '@/lib/auctionNetwork';
+import { isWalletAddressForNetwork, readOnchainAuction } from '@/lib/server/auctionChainState';
+import { verifyWalletSignature } from '@/lib/server/walletSignature';
 import { auditAssetEvent } from '@/lib/server/assetAudit';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { auctionId, address, signature, timestamp } = body;
+    const { auctionId, address, signature, timestamp, network } = body;
 
     if (!auctionId || !address || !signature || !timestamp) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
+    const networkId = parseAuctionNetwork(network);
+    if (!networkId) return NextResponse.json({ error: 'Unsupported auction network.' }, { status: 400 });
     const id = String(auctionId);
     const time = Number(timestamp);
-    if (!/^[1-9]\d{0,77}$/.test(id) || !isAddress(String(address)) || !Number.isSafeInteger(time)) {
+    if (!isValidAuctionIdForNetwork(id, networkId) || !isWalletAddressForNetwork(address, networkId) || !Number.isSafeInteger(time)) {
       return NextResponse.json({ error: 'Invalid auction ID, wallet address, or timestamp.' }, { status: 400 });
     }
 
@@ -29,51 +30,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Signature expired or invalid timestamp' }, { status: 401 });
     }
 
-    const message = datasetDownloadMessage({ auctionId: id, address: String(address), timestamp: time });
-    const isValidSignature = await verifyMessage({
-      address: address as `0x${string}`,
-      message,
-      signature: signature as `0x${string}`,
-    });
+    const message = datasetDownloadMessageFor(networkId, { auctionId: id, address, timestamp: time });
+    const isValidSignature = await verifyWalletSignature({ address, message, signature });
 
     if (!isValidSignature) {
-      auditAssetEvent({ action: 'download', result: 'denied', auctionId: id, walletAddress: String(address), reasonCode: 'invalid_signature' });
+      auditAssetEvent({ action: 'download', result: 'denied', auctionId: id, walletAddress: address, reasonCode: 'invalid_signature' });
       return NextResponse.json({ error: 'Invalid wallet signature' }, { status: 401 });
     }
 
-    // 3. Verify On-Chain State
-    const publicClient = createPublicClient({ chain: bnbChain, transport: http(process.env.NEXT_PUBLIC_BNB_CHAIN_RPC || undefined) });
-
-    const auctionRaw = await publicClient.readContract({
-      address: VEIL_V3_CONTRACT_ADDRESS,
-      abi: VEIL_V3_ABI,
-      functionName: 'auctions',
-      args: [BigInt(id)],
-    });
-
-    const values = auctionRaw as readonly [
-      bigint, string, string, string, string,
-      bigint, bigint, bigint, bigint, bigint, number, string,
-      bigint, bigint, bigint, string, string, string
-    ];
-
-    const state = values[10]; // VeilV2 AuctionState
-    const highestBidder = values[11];
+    // 3. Verify on-chain state on the auction's own network
+    const auction = await readOnchainAuction(networkId, id);
+    if (!auction) return NextResponse.json({ error: 'Auction not found' }, { status: 404 });
 
     // Allowed states for winner to download full dataset: Completed(6) ONLY.
     // If Inspection(3), RefundRequested(4), UnderReview(5), Refunded(7) or Cancelled(8), access is blocked.
-    if (state !== 6) {
-      auditAssetEvent({ action: 'download', result: 'denied', auctionId: id, walletAddress: String(address), reasonCode: 'auction_state' });
+    if (auction.state !== 6) {
+      auditAssetEvent({ action: 'download', result: 'denied', auctionId: id, walletAddress: address, reasonCode: 'auction_state' });
       return NextResponse.json({ error: 'Data access is only allowed for the winner after successful completion.' }, { status: 403 });
     }
 
-    if (highestBidder.toLowerCase() !== address.toLowerCase()) {
-      auditAssetEvent({ action: 'download', result: 'denied', auctionId: id, walletAddress: String(address), reasonCode: 'not_winner' });
+    if (!sameWallet(auction.highestBidder, address, networkId)) {
+      auditAssetEvent({ action: 'download', result: 'denied', auctionId: id, walletAddress: address, reasonCode: 'not_winner' });
       return NextResponse.json({ error: 'Wallet is not the winning bidder' }, { status: 403 });
     }
 
     // 4. Retrieve Dataset Record & Key
-    const record = await getDatasetRecordByAuctionId(id);
+    const record = await getDatasetRecordByAuctionId(id, networkId);
     if (!record) {
       return NextResponse.json({ error: 'Dataset record not found for this auction' }, { status: 404 });
     }
@@ -133,7 +115,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    auditAssetEvent({ action: 'download', result: 'success', assetType: record.assetType || 'dataset', sizeBytes: record.size, auctionId: id, walletAddress: String(address) });
+    auditAssetEvent({ action: 'download', result: 'success', assetType: record.assetType || 'dataset', sizeBytes: record.size, auctionId: id, walletAddress: address });
     return new Response(stream, {
       status: 200,
       headers: {

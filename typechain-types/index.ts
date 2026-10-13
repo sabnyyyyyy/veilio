@@ -27,6 +27,8 @@ export type { MockERC1155 } from "./mocks/MockNFTs.sol/MockERC1155";
 export { MockERC1155__factory } from "./factories/mocks/MockNFTs.sol/MockERC1155__factory";
 export type { MockERC721 } from "./mocks/MockNFTs.sol/MockERC721";
 export { MockERC721__factory } from "./factories/mocks/MockNFTs.sol/MockERC721__factory";
+export type { NftGriefer } from "./mocks/NftGriefer";
+export { NftGriefer__factory } from "./factories/mocks/NftGriefer__factory";
 export { RejectingReceiver__factory } from "./factories/RejectingReceiver__factory";
 export type { IERC1155Veil } from "./VeilNFTV4.sol/IERC1155Veil";
 export { IERC1155Veil__factory } from "./factories/VeilNFTV4.sol/IERC1155Veil__factory";

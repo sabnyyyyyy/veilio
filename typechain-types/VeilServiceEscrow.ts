@@ -62,12 +62,15 @@ export declare namespace VeilServiceEscrow {
 export interface VeilServiceEscrowInterface extends Interface {
   getFunction(
     nameOrSignature:
+      | "DISPUTE_TIMEOUT"
       | "MAX_FEE_BPS"
       | "cancelOrder"
       | "deposit"
       | "dispute"
+      | "disputedAt"
       | "feeRecipient"
       | "getOrder"
+      | "orderFeeBps"
       | "orders"
       | "owner"
       | "pendingWithdrawals"
@@ -75,6 +78,7 @@ export interface VeilServiceEscrowInterface extends Interface {
       | "refund"
       | "releaseFunds"
       | "resolveDispute"
+      | "resolveDisputeTimeout"
       | "reviewer"
       | "setFeeConfig"
       | "setReviewer"
@@ -86,6 +90,7 @@ export interface VeilServiceEscrowInterface extends Interface {
     nameOrSignatureOrTopic:
       | "DeliverySubmitted"
       | "DisputeResolved"
+      | "DisputeTimedOut"
       | "FeeConfigUpdated"
       | "OrderDisputed"
       | "OrderFunded"
@@ -96,6 +101,10 @@ export interface VeilServiceEscrowInterface extends Interface {
       | "WithdrawalPending"
   ): EventFragment;
 
+  encodeFunctionData(
+    functionFragment: "DISPUTE_TIMEOUT",
+    values?: undefined
+  ): string;
   encodeFunctionData(
     functionFragment: "MAX_FEE_BPS",
     values?: undefined
@@ -113,10 +122,18 @@ export interface VeilServiceEscrowInterface extends Interface {
     values: [BytesLike, string]
   ): string;
   encodeFunctionData(
+    functionFragment: "disputedAt",
+    values: [BytesLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "feeRecipient",
     values?: undefined
   ): string;
   encodeFunctionData(functionFragment: "getOrder", values: [BytesLike]): string;
+  encodeFunctionData(
+    functionFragment: "orderFeeBps",
+    values: [BytesLike]
+  ): string;
   encodeFunctionData(functionFragment: "orders", values: [BytesLike]): string;
   encodeFunctionData(functionFragment: "owner", values?: undefined): string;
   encodeFunctionData(
@@ -139,6 +156,10 @@ export interface VeilServiceEscrowInterface extends Interface {
     functionFragment: "resolveDispute",
     values: [BytesLike, BigNumberish]
   ): string;
+  encodeFunctionData(
+    functionFragment: "resolveDisputeTimeout",
+    values: [BytesLike]
+  ): string;
   encodeFunctionData(functionFragment: "reviewer", values?: undefined): string;
   encodeFunctionData(
     functionFragment: "setFeeConfig",
@@ -158,6 +179,10 @@ export interface VeilServiceEscrowInterface extends Interface {
   ): string;
 
   decodeFunctionResult(
+    functionFragment: "DISPUTE_TIMEOUT",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "MAX_FEE_BPS",
     data: BytesLike
   ): Result;
@@ -167,11 +192,16 @@ export interface VeilServiceEscrowInterface extends Interface {
   ): Result;
   decodeFunctionResult(functionFragment: "deposit", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "dispute", data: BytesLike): Result;
+  decodeFunctionResult(functionFragment: "disputedAt", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "feeRecipient",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "getOrder", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "orderFeeBps",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(functionFragment: "orders", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "owner", data: BytesLike): Result;
   decodeFunctionResult(
@@ -189,6 +219,10 @@ export interface VeilServiceEscrowInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "resolveDispute",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "resolveDisputeTimeout",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "reviewer", data: BytesLike): Result;
@@ -247,6 +281,28 @@ export namespace DisputeResolvedEvent {
     orderId: string;
     buyerShare: bigint;
     sellerShare: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace DisputeTimedOutEvent {
+  export type InputTuple = [
+    orderId: BytesLike,
+    buyer: AddressLike,
+    refundAmount: BigNumberish
+  ];
+  export type OutputTuple = [
+    orderId: string,
+    buyer: string,
+    refundAmount: bigint
+  ];
+  export interface OutputObject {
+    orderId: string;
+    buyer: string;
+    refundAmount: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -447,6 +503,8 @@ export interface VeilServiceEscrow extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
+  DISPUTE_TIMEOUT: TypedContractMethod<[], [bigint], "view">;
+
   MAX_FEE_BPS: TypedContractMethod<[], [bigint], "view">;
 
   cancelOrder: TypedContractMethod<
@@ -467,6 +525,8 @@ export interface VeilServiceEscrow extends BaseContract {
     "nonpayable"
   >;
 
+  disputedAt: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
+
   feeRecipient: TypedContractMethod<[], [string], "view">;
 
   getOrder: TypedContractMethod<
@@ -474,6 +534,8 @@ export interface VeilServiceEscrow extends BaseContract {
     [VeilServiceEscrow.EscrowOrderStructOutput],
     "view"
   >;
+
+  orderFeeBps: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
 
   orders: TypedContractMethod<
     [arg0: BytesLike],
@@ -527,6 +589,12 @@ export interface VeilServiceEscrow extends BaseContract {
     "nonpayable"
   >;
 
+  resolveDisputeTimeout: TypedContractMethod<
+    [orderId: BytesLike],
+    [void],
+    "nonpayable"
+  >;
+
   reviewer: TypedContractMethod<[], [string], "view">;
 
   setFeeConfig: TypedContractMethod<
@@ -554,6 +622,9 @@ export interface VeilServiceEscrow extends BaseContract {
   ): T;
 
   getFunction(
+    nameOrSignature: "DISPUTE_TIMEOUT"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
     nameOrSignature: "MAX_FEE_BPS"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
@@ -578,6 +649,9 @@ export interface VeilServiceEscrow extends BaseContract {
     "nonpayable"
   >;
   getFunction(
+    nameOrSignature: "disputedAt"
+  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
+  getFunction(
     nameOrSignature: "feeRecipient"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
@@ -587,6 +661,9 @@ export interface VeilServiceEscrow extends BaseContract {
     [VeilServiceEscrow.EscrowOrderStructOutput],
     "view"
   >;
+  getFunction(
+    nameOrSignature: "orderFeeBps"
+  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "orders"
   ): TypedContractMethod<
@@ -643,6 +720,9 @@ export interface VeilServiceEscrow extends BaseContract {
     "nonpayable"
   >;
   getFunction(
+    nameOrSignature: "resolveDisputeTimeout"
+  ): TypedContractMethod<[orderId: BytesLike], [void], "nonpayable">;
+  getFunction(
     nameOrSignature: "reviewer"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
@@ -679,6 +759,13 @@ export interface VeilServiceEscrow extends BaseContract {
     DisputeResolvedEvent.InputTuple,
     DisputeResolvedEvent.OutputTuple,
     DisputeResolvedEvent.OutputObject
+  >;
+  getEvent(
+    key: "DisputeTimedOut"
+  ): TypedContractEvent<
+    DisputeTimedOutEvent.InputTuple,
+    DisputeTimedOutEvent.OutputTuple,
+    DisputeTimedOutEvent.OutputObject
   >;
   getEvent(
     key: "FeeConfigUpdated"
@@ -758,6 +845,17 @@ export interface VeilServiceEscrow extends BaseContract {
       DisputeResolvedEvent.InputTuple,
       DisputeResolvedEvent.OutputTuple,
       DisputeResolvedEvent.OutputObject
+    >;
+
+    "DisputeTimedOut(bytes32,address,uint256)": TypedContractEvent<
+      DisputeTimedOutEvent.InputTuple,
+      DisputeTimedOutEvent.OutputTuple,
+      DisputeTimedOutEvent.OutputObject
+    >;
+    DisputeTimedOut: TypedContractEvent<
+      DisputeTimedOutEvent.InputTuple,
+      DisputeTimedOutEvent.OutputTuple,
+      DisputeTimedOutEvent.OutputObject
     >;
 
     "FeeConfigUpdated(address,uint256)": TypedContractEvent<

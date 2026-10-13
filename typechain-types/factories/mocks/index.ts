@@ -2,3 +2,4 @@
 /* tslint:disable */
 /* eslint-disable */
 export * as mockNfTsSol from "./MockNFTs.sol";
+export { NftGriefer__factory } from "./NftGriefer__factory";

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createPublicClient, http, isAddress } from 'viem';
-import { bnbChain } from '@/lib/chain';
-import { VEIL_V3_CONTRACT_ADDRESS, VEIL_V3_ABI } from '@/lib/contract';
-import { submitDispute, getDispute } from '@/lib/server/transactionDb';
+import { submitDispute } from '@/lib/server/transactionDb';
 import { validateTransactionContext } from '@/lib/server/aiValidator';
 import { getDatasetRecordByAuctionId } from '@/lib/server/datasetDb';
+import { AUCTION_AUTH_ACTIONS, isValidAuctionIdForNetwork, parseAuctionNetwork, sameWallet } from '@/lib/auctionNetwork';
+import { readOnchainAuction } from '@/lib/server/auctionChainState';
+import { verifyAuctionAuth } from '@/lib/server/auctionAuth';
+
 
 export async function POST(
   req: NextRequest,
@@ -14,13 +15,10 @@ export async function POST(
     const { id } = await params;
     const auctionId = String(id);
 
-    if (!/^[1-9]\d{0,77}$/.test(auctionId)) {
-      return NextResponse.json({ error: 'Invalid auction ID' }, { status: 400 });
-    }
-
     const body = await req.json();
     const {
-      buyerAddress,
+      network,
+      auth,
       issueCategory,
       expectedCondition,
       actualCondition,
@@ -29,8 +27,12 @@ export async function POST(
       requestedResolution = 'Full Refund',
     } = body;
 
-    if (!buyerAddress || !isAddress(String(buyerAddress))) {
-      return NextResponse.json({ error: 'Valid buyerAddress is required' }, { status: 400 });
+    const networkId = parseAuctionNetwork(network);
+    if (!networkId) {
+      return NextResponse.json({ error: 'Unsupported auction network' }, { status: 400 });
+    }
+    if (!isValidAuctionIdForNetwork(auctionId, networkId)) {
+      return NextResponse.json({ error: 'Invalid auction ID' }, { status: 400 });
     }
 
     if (!issueCategory || !expectedCondition || !actualCondition || !description) {
@@ -39,33 +41,33 @@ export async function POST(
         { status: 400 }
       );
     }
+    if (!Array.isArray(evidenceReferences) || evidenceReferences.some((ref: unknown) => typeof ref !== 'string')) {
+      return NextResponse.json({ error: 'evidenceReferences must be a list of strings' }, { status: 400 });
+    }
 
-    // Verify on-chain caller is the actual highest bidder and state allows refund
-    const publicClient = createPublicClient({
-      chain: bnbChain,
-      transport: http(process.env.NEXT_PUBLIC_BNB_CHAIN_RPC || undefined),
-    });
+    // The caller proves wallet ownership with a signature (EIP-191 / ed25519);
+    // a client-supplied address alone is not trusted.
+    const authResult = await verifyAuctionAuth({ action: AUCTION_AUTH_ACTIONS.submitDispute, networkId, auctionId, auth });
+    if (!authResult.valid) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.status });
+    }
+    const buyerAddress = authResult.address;
 
-    const raw = (await publicClient.readContract({
-      address: VEIL_V3_CONTRACT_ADDRESS,
-      abi: VEIL_V3_ABI,
-      functionName: 'auctions',
-      args: [BigInt(auctionId)],
-    })) as readonly unknown[];
-
-    if (!raw || Number(raw[0]) === 0) {
+    // Verify on-chain that the signer is the actual highest bidder and state allows refund
+    const auction = await readOnchainAuction(networkId, auctionId);
+    if (!auction) {
       return NextResponse.json({ error: 'Auction not found on chain' }, { status: 404 });
     }
 
-    const seller = String(raw[1]);
-    const itemName = String(raw[2]);
-    const itemDescription = String(raw[3]);
-    const inspectionEndTime = Number(raw[9]);
-    const stateNumber = Number(raw[10]);
-    const highestBidder = String(raw[11]);
-    const highestBid = String(raw[12]);
+    const seller = auction.seller;
+    const itemName = auction.itemName;
+    const itemDescription = auction.description;
+    const inspectionEndTime = auction.inspectionEndTime;
+    const stateNumber = auction.state;
+    const highestBidder = auction.highestBidder;
+    const highestBid = auction.highestBid;
 
-    if (buyerAddress.toLowerCase() !== highestBidder.toLowerCase()) {
+    if (!sameWallet(buyerAddress, highestBidder, networkId)) {
       return NextResponse.json(
         { error: 'Unauthorized: Only the winning bidder can submit a dispute or request refund' },
         { status: 403 }
@@ -80,7 +82,7 @@ export async function POST(
       );
     }
 
-    const datasetRecord = await getDatasetRecordByAuctionId(auctionId);
+    const datasetRecord = await getDatasetRecordByAuctionId(auctionId, networkId);
 
     // Run AI validator assessment for reviewer notes
     const aiAssessment = await validateTransactionContext({
@@ -135,7 +137,7 @@ export async function POST(
       evidenceReferences,
       requestedResolution,
       aiAssessment,
-    });
+    }, networkId);
 
     return NextResponse.json({
       success: true,

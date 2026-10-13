@@ -2,6 +2,7 @@ import BlindBidAbi from './abi/BlindBid.json';
 import VeilV2Artifact from './abi/VeilV2.json';
 import VeilV3Artifact from './abi/VeilV3.json';
 import VeilNFTV4Artifact from './abi/VeilNFTV4.json';
+import { baseSepoliaChain } from './chain';
 
 // Legacy V1 Contract
 export const BLINDBID_CONTRACT_ADDRESS = (
@@ -27,7 +28,29 @@ if (!process.env.NEXT_PUBLIC_V3_CONTRACT_ADDRESS) {
 export const VEIL_V4_CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_V4_CONTRACT_ADDRESS as `0x${string}` | undefined;
 export const VEIL_V3_CONTRACT_ADDRESS = (
   VEIL_V4_CONTRACT_ADDRESS || process.env.NEXT_PUBLIC_V3_CONTRACT_ADDRESS ||
-  '0x0D1c307B4D59143703aE38fB6479d9Dac1fec987'
+  '0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1'
 ) as `0x${string}`;
 
-export const VEIL_V3_ABI = VEIL_V4_CONTRACT_ADDRESS ? VeilNFTV4Artifact.abi : VeilV3Artifact.abi;
+export const VEIL_V3_ABI = (VEIL_V4_CONTRACT_ADDRESS || VEIL_V3_CONTRACT_ADDRESS.toLowerCase() === '0xc12ecd53b9dae1753409b87f10bf00684bf7d8b1')
+  ? VeilNFTV4Artifact.abi
+  : VeilV3Artifact.abi;
+
+export const BASE_SEPOLIA_AUCTION_ADDRESS = (
+  process.env.NEXT_PUBLIC_BASE_SEPOLIA_AUCTION_ADDRESS || '0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1'
+) as `0x${string}`;
+
+export function getAuctionContractConfig(chainId: number) {
+  if (chainId === baseSepoliaChain.id) {
+    if (!BASE_SEPOLIA_AUCTION_ADDRESS) {
+      throw new Error('Base Sepolia auction address is not configured.');
+    }
+    return { address: BASE_SEPOLIA_AUCTION_ADDRESS, abi: VeilNFTV4Artifact.abi } as const;
+  }
+  if (chainId === 97) {
+    if (!VEIL_V3_CONTRACT_ADDRESS) {
+      throw new Error('BNB Chain Testnet auction address is not configured.');
+    }
+    return { address: VEIL_V3_CONTRACT_ADDRESS, abi: VEIL_V3_ABI } as const;
+  }
+  throw new Error(`VEILIO auctions are not configured for chain ${chainId}.`);
+}

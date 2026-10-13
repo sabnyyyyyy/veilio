@@ -68,9 +68,19 @@ export default function AuctionCard({ auction }: AuctionCardProps) {
   const isAgentCompatible = auction.metadata?.agentCompatible ?? true;
   const formatTag = auction.metadata?.format;
 
+  const isSolana = auction.networkId === 'solana:devnet';
+  const isBase = auction.networkId === 'base:84532';
+  const networkLabel = isSolana ? 'Solana Devnet' : isBase ? 'Base Sepolia' : 'BNB Chain';
+  const networkTone = isSolana
+    ? 'text-[#9D8CFF] border-[#8B7BFF]/30 bg-[#0A0A09]/85'
+    : isBase
+    ? 'text-sky-300 border-sky-400/30 bg-[#0A0A09]/85'
+    : 'text-[#E6CC91] border-[#C9A45C]/30 bg-[#0A0A09]/85';
+  const auctionDetailHref = `/auctions/${auction.id}${isBase ? '?network=base' : isSolana ? '?network=solana' : ''}`;
+
   return (
     <Link
-      href={`/auctions/${auction.id}`}
+      href={auctionDetailHref}
       className="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-white/[0.09] bg-[#12120F] shadow-[0_12px_40px_rgba(0,0,0,0.18)] transition duration-300 hover:-translate-y-1 hover:border-[#C9A45C]/35 hover:shadow-[0_20px_55px_rgba(0,0,0,0.34)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A45C]"
     >
       <div className="relative aspect-[16/10] w-full overflow-hidden bg-[#10120F]">
@@ -115,6 +125,12 @@ export default function AuctionCard({ auction }: AuctionCardProps) {
           {statusLabel}
         </div>
 
+        {/* Originating Network Badge */}
+        <div className={`absolute bottom-2.5 left-3 inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[8px] font-semibold uppercase tracking-wider backdrop-blur-sm ${networkTone}`}>
+          <span className="w-1.5 h-1.5 rounded-full bg-current opacity-80" />
+          <span>{networkLabel}</span>
+        </div>
+
         {/* Agent badge bottom-right of image */}
         {isAgentCompatible && (
           <div className="absolute bottom-2.5 right-3 inline-flex items-center gap-1 rounded border border-[#C9A45C]/30 bg-[#0A0A09]/85 px-1.5 py-0.5 text-[8px] font-mono uppercase tracking-wider text-[#C9A45C] backdrop-blur-sm">
@@ -130,7 +146,7 @@ export default function AuctionCard({ auction }: AuctionCardProps) {
             {auction.itemName}
           </h3>
           <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-[#918D82]">
-            {auction.description || 'Verified digital asset listed for private sealed bidding on BNB Chain.'}
+            {auction.description || (isSolana ? 'Verified digital asset listed for private sealed bidding on Solana Devnet.' : isBase ? 'Verified digital asset listed for private sealed bidding on Base Sepolia.' : 'Verified digital asset listed for private sealed bidding on BNB Chain.')}
           </p>
         </div>
 
@@ -158,7 +174,7 @@ export default function AuctionCard({ auction }: AuctionCardProps) {
           <div>
             <span className="block text-[9px] font-medium uppercase tracking-[0.16em] text-[#77746B]">Starting price</span>
             <span className="mt-0.5 block text-sm font-semibold tabular-nums text-[#F5F2E8]">
-              {auction.startingPrice} <span className="text-[11px] font-medium text-[#A8A397]">BNB</span>
+              {auction.startingPrice} <span className="text-[11px] font-medium text-[#A8A397]">{auction.networkId === 'base:84532' ? 'ETH' : auction.networkId === 'solana:devnet' ? 'SOL' : 'BNB'}</span>
             </span>
           </div>
           <div className="text-right">

@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
+import { time } from '@nomicfoundation/hardhat-network-helpers';
 import { VeilServiceEscrow, RejectingReceiver } from '../typechain-types';
 import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 
@@ -467,6 +468,76 @@ describe('VeilServiceEscrow Contract', () => {
         .withArgs(stranger.address);
 
       expect(await escrow.reviewer()).to.equal(stranger.address);
+    });
+  });
+  describe('Fee snapshot & dispute timeout (hardening)', () => {
+    const DISPUTE_TIMEOUT = 7 * 24 * 60 * 60;
+    const orderId2 = ethers.encodeBytes32String('order-test-002');
+
+    async function fund(id: string) {
+      const latestBlock = await ethers.provider.getBlock('latest');
+      const deadline = (latestBlock?.timestamp ?? 0) + 86400;
+      await escrow.connect(buyer).deposit(id, seller.address, deadline, { value: depositAmount });
+    }
+
+    it('locks the fee rate at deposit so owner changes do not affect in-flight orders', async () => {
+      await fund(orderId1);
+      expect(await escrow.orderFeeBps(orderId1)).to.equal(500n);
+
+      await escrow.connect(owner).setFeeConfig(feeRecipient.address, 100);
+      await fund(orderId2);
+      expect(await escrow.orderFeeBps(orderId2)).to.equal(100n);
+
+      await expect(escrow.connect(buyer).releaseFunds(orderId1))
+        .to.emit(escrow, 'OrderReleased')
+        .withArgs(orderId1, buyer.address, seller.address, ethers.parseEther('0.95'), ethers.parseEther('0.05'));
+      await expect(escrow.connect(buyer).releaseFunds(orderId2))
+        .to.emit(escrow, 'OrderReleased')
+        .withArgs(orderId2, buyer.address, seller.address, ethers.parseEther('0.99'), ethers.parseEther('0.01'));
+    });
+
+    it('uses the snapshotted fee in dispute resolution and keeps the 5% cap', async () => {
+      await fund(orderId1);
+      await escrow.connect(owner).setFeeConfig(feeRecipient.address, 0);
+      await escrow.connect(buyer).dispute(orderId1, 'quality');
+      const before = await ethers.provider.getBalance(feeRecipient.address);
+      await escrow.connect(reviewer).resolveDispute(orderId1, 0);
+      const after = await ethers.provider.getBalance(feeRecipient.address);
+      expect(after - before).to.equal(ethers.parseEther('0.05'));
+      await expect(escrow.connect(owner).setFeeConfig(feeRecipient.address, 501)).to.be.revertedWith('Fee exceeds max');
+    });
+
+    it('refunds the buyer in full after DISPUTE_TIMEOUT when the reviewer is absent (anyone can trigger)', async () => {
+      expect(await escrow.DISPUTE_TIMEOUT()).to.equal(BigInt(DISPUTE_TIMEOUT));
+      await fund(orderId1);
+      await expect(escrow.connect(stranger).resolveDisputeTimeout(orderId1)).to.be.revertedWith('Order is not in disputed state');
+      await escrow.connect(seller).submitDelivery(orderId1, 'ipfs://work');
+      await escrow.connect(seller).dispute(orderId1, 'buyer unresponsive');
+      expect(await escrow.disputedAt(orderId1)).to.be.greaterThan(0n);
+
+      await time.increase(DISPUTE_TIMEOUT - 10);
+      await expect(escrow.connect(stranger).resolveDisputeTimeout(orderId1)).to.be.revertedWith('Dispute review period still active');
+      await time.increase(20);
+
+      const before = await ethers.provider.getBalance(buyer.address);
+      await expect(escrow.connect(stranger).resolveDisputeTimeout(orderId1))
+        .to.emit(escrow, 'DisputeTimedOut').withArgs(orderId1, buyer.address, depositAmount)
+        .and.to.emit(escrow, 'DisputeResolved').withArgs(orderId1, depositAmount, 0);
+      expect((await ethers.provider.getBalance(buyer.address)) - before).to.equal(depositAmount);
+      const order = await escrow.getOrder(orderId1);
+      expect(order.status).to.equal(3); // Refunded
+      expect(order.amount).to.equal(0n);
+      expect(await ethers.provider.getBalance(await escrow.getAddress())).to.equal(0n);
+      await expect(escrow.connect(reviewer).resolveDispute(orderId1, 0)).to.be.revertedWith('Order is not in disputed state');
+      await expect(escrow.connect(stranger).resolveDisputeTimeout(orderId1)).to.be.revertedWith('Order is not in disputed state');
+    });
+
+    it('reviewer can still resolve after the timeout elapses if nobody triggered it', async () => {
+      await fund(orderId1);
+      await escrow.connect(buyer).dispute(orderId1, 'x');
+      await time.increase(DISPUTE_TIMEOUT + 1);
+      await escrow.connect(reviewer).resolveDispute(orderId1, 0);
+      expect((await escrow.getOrder(orderId1)).status).to.equal(2); // Released
     });
   });
 });

@@ -1,6 +1,6 @@
 import type { usePublicClient } from 'wagmi';
 import { formatEther } from 'viem';
-import { VEIL_V3_ABI, VEIL_V3_CONTRACT_ADDRESS } from './contract';
+import { getAuctionContractConfig } from './contract';
 import { resolveIpfsUri } from './ipfs';
 
 type AuctionData = readonly [
@@ -52,17 +52,23 @@ export interface UserBidItem {
   winner: string;
   winningPrice: string; // Only valid if settled
   isWinner: boolean;
+  contractAddress?: string;
+  networkId?: 'bnb:97' | 'base:84532';
 }
 
 export async function fetchUserBids(
   publicClient: NonNullable<ReturnType<typeof usePublicClient>>,
-  userAddress: `0x${string}`
+  userAddress: `0x${string}`,
+  options: { chainId?: number } = {}
 ): Promise<UserBidItem[]> {
-  // Avoid an unbounded eth_getLogs scan: public BNB RPC endpoints reject
+  const targetChainId = options.chainId ?? publicClient.chain?.id ?? 97;
+  const contract = getAuctionContractConfig(targetChainId);
+
+  // Avoid an unbounded eth_getLogs scan: public RPC endpoints reject
   // requests spanning the entire chain. Inspect commitments in bounded batches.
   const count = await publicClient.readContract({
-    address: VEIL_V3_CONTRACT_ADDRESS,
-    abi: VEIL_V3_ABI,
+    address: contract.address,
+    abi: contract.abi,
     functionName: 'auctionCount',
   });
   const userCommitments = new Map<string, { auctionRaw: AuctionData; commitmentRaw: CommitmentData }>();
@@ -73,14 +79,14 @@ export async function fetchUserBids(
     const results = await Promise.all(ids.map(async (id) => {
       const [auctionRaw, commitmentRaw] = await Promise.all([
         publicClient.readContract({
-          address: VEIL_V3_CONTRACT_ADDRESS,
-          abi: VEIL_V3_ABI,
+          address: contract.address,
+          abi: contract.abi,
           functionName: 'auctions',
           args: [BigInt(id)],
         }),
         publicClient.readContract({
-          address: VEIL_V3_CONTRACT_ADDRESS,
-          abi: VEIL_V3_ABI,
+          address: contract.address,
+          abi: contract.abi,
           functionName: 'commitments',
           args: [BigInt(id), userAddress],
         }),
@@ -193,6 +199,8 @@ export async function fetchUserBids(
         winner: highestBidder,
         winningPrice: formatEther(winningPrice),
         isWinner: highestBidder.toLowerCase() === userAddress.toLowerCase(),
+        contractAddress: contract.address,
+        networkId: targetChainId === 84532 ? 'base:84532' : 'bnb:97',
       });
     } catch (error) {
       console.error(`Failed to load bid for auction ${idStr}:`, error);
@@ -205,18 +213,21 @@ export async function fetchUserBids(
 
 export async function fetchUserRefund(
   publicClient: NonNullable<ReturnType<typeof usePublicClient>>,
-  userAddress: `0x${string}`
+  userAddress: `0x${string}`,
+  options: { chainId?: number } = {}
 ): Promise<string> {
+  const targetChainId = options.chainId ?? publicClient.chain?.id ?? 97;
+  const contract = getAuctionContractConfig(targetChainId);
   try {
     const refund = await publicClient.readContract({
-      address: VEIL_V3_CONTRACT_ADDRESS,
-      abi: VEIL_V3_ABI,
+      address: contract.address,
+      abi: contract.abi,
       functionName: 'pendingRefunds',
       args: [userAddress],
     });
     return formatEther(refund as bigint);
   } catch (err) {
-    console.error('Failed to fetch refund:', err);
+    console.error(`Failed to fetch refund on chain ${targetChainId}:`, err);
     return '0';
   }
 }

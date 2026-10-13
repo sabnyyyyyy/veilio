@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { isAddress, verifyMessage } from 'viem';
+import { isSupportedWalletAddress, normalizeWalletAddress, verifyWalletSignature } from '@/lib/server/walletSignature';
 import { encryptFile } from '@/lib/server/encryption';
 import { assetStorageConfigurationError, consumeUploadNonce, saveDatasetRecord, getEncryptedDir, type DatasetRecord } from '@/lib/server/datasetDb';
 import { allowAssetUpload } from '@/lib/server/uploadRateLimit';
@@ -37,14 +37,14 @@ export async function POST(req: NextRequest) {
     const fileName = sanitizeAssetFileName(file.name);
     const validationError = validateAssetUpload(assetType, fileName, file.size);
     if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
-    if (!isAddress(address) || !Number.isSafeInteger(timestamp) || !/^[0-9a-f-]{36}$/i.test(nonce) || !signature) {
+    if (!isSupportedWalletAddress(address) || !Number.isSafeInteger(timestamp) || !/^[0-9a-f-]{36}$/i.test(nonce) || !signature) {
       return NextResponse.json({ error: 'A wallet signature is required to upload an asset.' }, { status: 401 });
     }
     if (Math.abs(Date.now() - timestamp) > 5 * 60 * 1000) {
       return NextResponse.json({ error: 'Upload authorization expired. Please select the file again.' }, { status: 401 });
     }
     const message = assetUploadMessage({ address, assetType, fileName, fileSize: file.size, timestamp, nonce });
-    const authorized = await verifyMessage({ address, message, signature: signature as `0x${string}` });
+    const authorized = await verifyWalletSignature({ address, message, signature });
     if (!authorized) return NextResponse.json({ error: 'Wallet signature does not authorize this file upload.' }, { status: 401 });
     try {
       const storageError = assetStorageConfigurationError();
@@ -214,7 +214,7 @@ export async function POST(req: NextRequest) {
     // Save metadata and keys to private DB
     const record: DatasetRecord = {
       datasetId,
-      uploader: address.toLowerCase(),
+      uploader: normalizeWalletAddress(address),
       uploadNonce: nonce,
       assetType: assetType as DatasetRecord['assetType'],
       deliveryMethod: assetType === 'software-license' ? 'license-access' : 'encrypted-download',

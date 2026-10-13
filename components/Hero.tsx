@@ -2,52 +2,109 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { ArrowDownRight, ArrowRight } from 'lucide-react';
-import HeroVisual from './home/HeroVisual';
+import Image from 'next/image';
+import { ArrowRight, ChevronRight } from 'lucide-react';
 
 export default function Hero() {
+  const marqueeItems = [
+    { name: 'BNB CHAIN', tag: 'Settlement L1', logo: '/logos/chains/bnb-chain.svg' },
+    { name: 'SOLANA', tag: 'High-Speed Escrow', logo: '/logos/chains/solana.svg' },
+    { name: 'BASE', tag: 'OP Stack L2', logo: '/logos/chains/base.svg' },
+  ];
+  // Only 3 chains: repeat the set so one half of the track is wider than the
+  // viewport, then duplicate that half so translateX(-50%) loops seamlessly.
+  const MARQUEE_SET_REPEAT = 4;
+  const marqueeHalf = Array.from({ length: MARQUEE_SET_REPEAT }, () => marqueeItems).flat();
+  const marqueeTrack = [...marqueeHalf, ...marqueeHalf];
+
   return (
-    <>
-      <section className="relative isolate overflow-hidden border-b border-white/[0.06] px-5 pb-12 pt-12 sm:px-8 sm:pb-16 sm:pt-14 lg:px-10 lg:pb-20 lg:pt-16">
-        <div aria-hidden="true" className="pointer-events-none absolute left-1/2 top-[26%] h-[480px] w-[min(90vw,900px)] -translate-x-1/2 rounded-full bg-[#C9A45C]/[0.045] blur-[150px]" />
-        <div aria-hidden="true" className="pointer-events-none absolute left-1/2 top-[58%] h-[400px] w-[min(80vw,720px)] -translate-x-1/2 rounded-full bg-[#C9A45C]/[0.035] blur-[140px]" />
+    <section className="relative min-h-screen flex flex-col justify-between items-center overflow-hidden pt-28 pb-8 sm:pt-32 sm:pb-10">
 
-        <div className="relative z-10 mx-auto flex w-full max-w-[1180px] flex-col items-center text-center">
-          <h1 className="text-[clamp(2.25rem,4vw,3.75rem)] font-extrabold uppercase leading-[0.94] tracking-[-0.065em] text-[#F5F2E8]">
-            Digital assets &amp; datasets
-            <span className="mt-1.5 block text-[#A8A397]">sealed auctions &amp; escrow<span className="text-[#C9A45C]">.</span></span>
-          </h1>
-
-          <p className="mt-5 max-w-[640px] text-[14px] leading-6 text-[#C7C2B7] sm:mt-6 sm:text-[16px] sm:leading-7">
-            The on-chain marketplace where humans and autonomous AI agents discover, evaluate, and trade datasets, AI models, licenses, and verified services through sealed-bid auctions and milestone escrow.
-          </p>
-
-          <div className="mt-6 flex w-full flex-col justify-center gap-2.5 sm:mt-7 sm:w-auto sm:flex-row sm:items-center sm:gap-5">
-            <Link
-              href="/auctions"
-              className="group inline-flex h-[50px] items-center justify-center gap-3 rounded-md bg-[#C9A45C] px-6 text-[11px] font-extrabold uppercase tracking-[0.13em] text-[#10100D] shadow-[0_10px_35px_rgba(201,164,92,0.13)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#E2C17C] hover:shadow-[0_14px_40px_rgba(201,164,92,0.22)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#E2C17C]"
-            >
-              Explore auctions
-              <ArrowRight size={15} className="transition-transform group-hover:translate-x-1" />
-            </Link>
-            <Link
-              href="/how-it-works"
-              className="group inline-flex h-[48px] items-center justify-center gap-2 px-3 text-[10px] font-bold uppercase tracking-[0.15em] text-[#AAA69B] transition-colors hover:text-[#F5F2E8]"
-            >
-              See how VEILIO works
-              <ArrowDownRight size={14} className="transition-transform group-hover:translate-x-0.5 group-hover:translate-y-0.5" />
-            </Link>
-          </div>
-
-          <div className="relative mt-8 w-full max-w-[900px] sm:mt-9 lg:mt-10">
-            <div aria-hidden="true" className="pointer-events-none absolute inset-12 rounded-full bg-[#C9A45C]/[0.05] blur-[80px]" />
-            <div className="relative mx-auto w-full max-w-[900px]">
-              <HeroVisual />
-            </div>
-          </div>
-
+      {/* Hero Content Container - Expanded Width */}
+      <div className="relative z-10 w-full max-w-[1440px] mx-auto px-6 sm:px-10 lg:px-16 flex-1 flex flex-col justify-center items-center text-center my-auto">
+        {/* Eyebrow Pill Badge */}
+        <div className="mb-7 inline-flex items-center gap-2.5 rounded-full border border-white/15 bg-black/60 px-5 py-1.5 text-xs font-bold uppercase tracking-[0.22em] text-[#E2C17C] backdrop-blur-md shadow-[0_0_24px_rgba(226,193,124,0.18)]">
+          <span className="h-2 w-2 rounded-full bg-[#E2C17C] animate-pulse" />
+          <span>Human &amp; AI Economy</span>
+          <span className="text-white/40">/</span>
+          <span className="text-white/80 font-mono text-[11px]">SEALED PROTOCOL</span>
         </div>
-      </section>
-    </>
+
+        {/* Display Headline - Expanded Max-Width & Fluid Scale */}
+        <h1 className="relative z-10 w-full max-w-6xl text-balance text-center text-[clamp(2.4rem,6.2vw,5.2rem)] font-extrabold uppercase leading-[0.98] tracking-tight text-white drop-shadow-[0_4px_30px_rgba(0,0,0,0.95)]">
+          <span className="block">The on-chain exchange</span>
+          <span className="block mt-2 bg-gradient-to-b from-white via-zinc-100 to-[#E2C17C] bg-clip-text text-transparent">
+            for humans &amp; autonomous agents
+          </span>
+        </h1>
+
+        {/* Subtitle - Expanded Width & Size */}
+        <p className="relative z-10 mt-7 max-w-3xl text-center text-base sm:text-lg lg:text-xl leading-relaxed text-zinc-300 font-normal drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]">
+          Coordinate trustless sealed-bid auctions, encrypted digital asset escrow, and verified AI service contracts across BNB Chain, Base, and Solana.
+        </p>
+
+        {/* Dual CTA Buttons */}
+        <div className="mt-9 sm:mt-11 flex w-full flex-col items-center justify-center gap-4 sm:w-auto sm:flex-row sm:gap-6">
+          {/* Glowing Border Star Button */}
+          <Link
+            href="/auctions"
+            className="group relative inline-flex h-12 items-center justify-center gap-2 overflow-hidden rounded-full p-[1px] font-medium transition-transform duration-200 hover:scale-[1.02] active:scale-[0.98]"
+          >
+            {/* Rotating Conic Glow */}
+            <span
+              className="absolute inset-[-100%] animate-spin-slow bg-[conic-gradient(from_90deg_at_50%_50%,#E2C17C_0%,#FFFFFF_25%,rgba(226,193,124,0.2)_50%,#FFFFFF_75%,#E2C17C_100%)] opacity-85"
+            />
+            {/* Button Surface */}
+            <span className="relative inline-flex h-full w-full items-center justify-center gap-2.5 rounded-full bg-[#050505] px-7 text-xs sm:text-[13px] font-bold uppercase tracking-[0.14em] text-white transition-colors group-hover:bg-[#0c0c0c]">
+              <span>Explore Auctions</span>
+              <ArrowRight size={14} className="text-[#E2C17C] transition-transform group-hover:translate-x-1" />
+            </span>
+          </Link>
+
+          {/* Secondary White Pill Button */}
+          <Link
+            href="/services"
+            className="group inline-flex h-12 items-center justify-center gap-2 rounded-full border border-white/20 bg-white/95 px-7 text-xs sm:text-[13px] font-bold uppercase tracking-[0.14em] text-black shadow-lg transition-all duration-200 hover:bg-white hover:border-white hover:shadow-[0_0_25px_rgba(255,255,255,0.25)] active:scale-[0.98]"
+          >
+            <span>Verified Services</span>
+            <ChevronRight size={15} className="text-black/70 transition-transform group-hover:translate-x-0.5" />
+          </Link>
+        </div>
+      </div>
+
+      {/* Base Protocol & Ecosystem Marquee - Expanded */}
+      <div className="relative z-10 w-full max-w-[1440px] mx-auto mt-8 sm:mt-10 px-6 sm:px-10">
+        {/* Subtle Section Divider Line */}
+        <div className="relative mx-auto mb-4 h-px w-full max-w-6xl bg-gradient-to-r from-transparent via-white/15 to-transparent" />
+
+        {/* Marquee Ticker */}
+        <div className="relative overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_10%,black_90%,transparent)] [-webkit-mask-image:linear-gradient(to_right,transparent,black_10%,black_90%,transparent)] py-2">
+          <div className="animate-marquee">
+            {marqueeTrack.map((item, idx) => (
+              <div
+                key={`${item.name}-${idx}`}
+                aria-hidden={idx >= marqueeItems.length ? true : undefined}
+                className="flex items-center gap-3 whitespace-nowrap pr-12 sm:pr-16 opacity-70 hover:opacity-100 transition-opacity cursor-default"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-[#E2C17C]/80" />
+                <Image
+                  src={item.logo}
+                  alt=""
+                  width={16}
+                  height={16}
+                  className="h-4 w-4 shrink-0"
+                />
+                <span className="text-xs sm:text-[13px] font-bold tracking-[0.18em] uppercase text-white font-mono">
+                  {item.name}
+                </span>
+                <span className="text-[10px] sm:text-[11px] tracking-wider uppercase text-zinc-500 font-mono">
+                  [{item.tag}]
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }

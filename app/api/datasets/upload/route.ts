@@ -2,7 +2,7 @@ import { del, get, put } from '@vercel/blob';
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
 import { NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
-import { isAddress, verifyMessage } from 'viem';
+import { isSupportedWalletAddress, normalizeWalletAddress, sameWalletAddress, verifyWalletSignature } from '@/lib/server/walletSignature';
 import { assetUploadMessage } from '@/lib/assetAuth';
 import { MAX_ASSET_UPLOAD_BYTES, sanitizeAssetFileName, validateAssetUpload } from '@/lib/assetPolicy';
 import { decryptFile } from '@/lib/server/encryption';
@@ -59,7 +59,7 @@ function parseClientPayload(value: string | null): UploadClientPayload {
   catch { throw new Error('Invalid upload token request.'); }
   const fileName = sanitizeAssetFileName(payload.fileName || '');
   if (
-    !UUID.test(payload.datasetId || '') || !isAddress(payload.walletAddress || '') ||
+    !UUID.test(payload.datasetId || '') || !isSupportedWalletAddress(payload.walletAddress || '') ||
     !Number.isSafeInteger(payload.fileSize) || !Number.isSafeInteger(payload.timestamp) ||
     !UUID.test(payload.nonce || '') || typeof payload.signature !== 'string' ||
     !HASH.test(payload.fileHashHex || '') || !validBase64(payload.keyBase64, 32) || !validBase64(payload.ivBase64, 12) ||
@@ -142,7 +142,7 @@ async function finishPrivateBlobUpload(blob: { pathname: string }, datasetId: st
     finalPath = finalBlob.pathname;
     const record: DatasetRecord = {
       datasetId,
-      uploader: pending.address.toLowerCase(),
+      uploader: normalizeWalletAddress(pending.address),
       uploadNonce: pending.nonce,
       assetType: pending.assetType,
       deliveryMethod: pending.assetType === 'software-license' ? 'license-access' : 'encrypted-download',
@@ -203,7 +203,7 @@ export async function POST(request: NextRequest) {
           datasetId: payload.datasetId,
           fileHashHex: payload.fileHashHex,
         });
-        const authorized = await verifyMessage({ address: payload.walletAddress as `0x${string}`, message, signature: payload.signature as `0x${string}` });
+        const authorized = await verifyWalletSignature({ address: payload.walletAddress, message, signature: payload.signature });
         if (!authorized) throw new Error('Wallet signature does not authorize this asset upload.');
         if (!await consumeUploadNonce(payload.nonce)) throw new Error('This upload authorization has already been used.');
         if (!await allowAssetUpload(payload.walletAddress, Date.now(), payload.nonce)) throw new Error('Upload limit reached for this wallet. Try again later.');
@@ -248,17 +248,17 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const datasetId = request.nextUrl.searchParams.get('id') || '';
   const address = request.nextUrl.searchParams.get('address') || '';
-  if (!UUID.test(datasetId) || !isAddress(address)) return NextResponse.json({ error: 'Invalid upload status request.' }, { status: 400 });
+  if (!UUID.test(datasetId) || !isSupportedWalletAddress(address)) return NextResponse.json({ error: 'Invalid upload status request.' }, { status: 400 });
 
   try {
     const record = await getDatasetRecord(datasetId);
     if (record) {
-      if (record.uploader?.toLowerCase() !== address.toLowerCase()) return NextResponse.json({ error: 'Upload session belongs to another wallet.' }, { status: 403 });
+      if (!sameWalletAddress(record.uploader, address)) return NextResponse.json({ error: 'Upload session belongs to another wallet.' }, { status: 403 });
       return NextResponse.json({ status: 'ready', dataset: safeDatasetResponse(record) });
     }
     const pending = await getPendingAssetUpload(datasetId);
     if (!pending) return NextResponse.json({ error: 'Upload session expired. Please select the file again.' }, { status: 404 });
-    if (pending.address.toLowerCase() !== address.toLowerCase()) return NextResponse.json({ error: 'Upload session belongs to another wallet.' }, { status: 403 });
+    if (!sameWalletAddress(pending.address, address)) return NextResponse.json({ error: 'Upload session belongs to another wallet.' }, { status: 403 });
     if (pending.status === 'rejected') return NextResponse.json({ status: 'rejected', error: pending.error || 'Asset verification failed.' }, { status: 422 });
     return NextResponse.json({ status: pending.status });
   } catch {

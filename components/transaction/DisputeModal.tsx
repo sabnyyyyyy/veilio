@@ -1,21 +1,26 @@
 import React, { useState } from 'react';
 import { X, AlertTriangle, ShieldAlert, CheckCircle2, Loader2, ArrowRight } from 'lucide-react';
+import { AUCTION_AUTH_ACTIONS, auctionNetworkDisplayName, type AuctionAuthPayload, type AuctionNetworkId } from '@/lib/auctionNetwork';
 
 interface DisputeModalProps {
   auctionId: string;
-  buyerAddress: string;
+  networkId?: AuctionNetworkId;
   isOpen: boolean;
   onClose: () => void;
+  /** Signs a replay-resistant authorization for `action` with the winner's wallet. */
+  signAuth: (action: string) => Promise<AuctionAuthPayload>;
   onSubmitOnchain: (evidenceHash: string) => Promise<void>;
 }
 
 export default function DisputeModal({
   auctionId,
-  buyerAddress,
+  networkId = 'bnb:97',
   isOpen,
   onClose,
+  signAuth,
   onSubmitOnchain,
 }: DisputeModalProps) {
+  const isSolanaNetwork = networkId === 'solana:devnet';
   const [issueCategory, setIssueCategory] = useState('listing_mismatch');
   const [expectedCondition, setExpectedCondition] = useState('');
   const [actualCondition, setActualCondition] = useState('');
@@ -35,11 +40,13 @@ export default function DisputeModal({
     setStep('submitting_server');
 
     try {
+      const auth = await signAuth(AUCTION_AUTH_ACTIONS.submitDispute);
       const res = await fetch(`/api/transactions/${auctionId}/dispute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          buyerAddress,
+          network: networkId,
+          auth,
           issueCategory,
           expectedCondition,
           actualCondition,
@@ -171,7 +178,11 @@ export default function DisputeModal({
             </div>
 
             <div className="p-3 bg-[#0A0A09] rounded-xl border border-white/5 text-[11px] text-[#A8A397] leading-relaxed">
-              💡 Catatan Kontrak: Sesuai aturan smart contract VeilV3, persetujuan sengketa akan mengembalikan 100% dana ke saldo penarikan Anda (<code className="text-[#C9A45C]">pendingRefunds</code>).
+              {isSolanaNetwork ? (
+                <>💡 Catatan Program: persetujuan sengketa oleh reviewer mengembalikan 100% deposit langsung ke wallet Solana Anda. Jika reviewer tidak memutuskan dalam 7 hari, Anda dapat menarik dana sendiri (refund timeout).</>
+              ) : (
+                <>💡 Catatan Kontrak: Sesuai aturan smart contract VeilNFTV4, persetujuan sengketa akan mengembalikan 100% dana ke saldo penarikan Anda (<code className="text-[#C9A45C]">pendingRefunds</code>).</>
+              )}
             </div>
 
             <div className="pt-2 flex gap-3">
@@ -205,7 +216,7 @@ export default function DisputeModal({
               <p className="text-xs text-[#A8A397] max-w-sm">
                 {step === 'submitting_server'
                   ? 'AI Validator memverifikasi kelengkapan paket sengketa.'
-                  : 'Silakan konfirmasi pemanggilan fungsi requestRefund pada wallet Anda.'}
+                  : `Silakan konfirmasi pemanggilan fungsi ${isSolanaNetwork ? 'request_refund' : 'requestRefund'} pada wallet Anda.`}
               </p>
             </div>
             {computedEvidenceHash && (
@@ -222,7 +233,7 @@ export default function DisputeModal({
             <div className="space-y-1">
               <h4 className="text-lg font-bold text-[#F5F2E8]">Sengketa Berhasil Didaftarkan</h4>
               <p className="text-xs text-[#A8A397] max-w-sm">
-                Transaksi on-chain <code className="text-[#C9A45C]">requestRefund</code> telah dikonfirmasi di BNB Chain Testnet. Status lelang kini berada dalam fase Review.
+                Transaksi on-chain <code className="text-[#C9A45C]">{isSolanaNetwork ? 'request_refund' : 'requestRefund'}</code> telah dikonfirmasi di {auctionNetworkDisplayName(networkId)}. Status lelang kini berada dalam fase Review.
               </p>
             </div>
             <button

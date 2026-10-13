@@ -27,40 +27,56 @@ export interface VeilV3Interface extends Interface {
   getFunction(
     nameOrSignature:
       | "BPS_DENOMINATOR"
+      | "MAX_BIDDERS_PER_AUCTION"
+      | "NON_REVEAL_PENALTY_PERCENT"
       | "PLATFORM_FEE_BPS"
+      | "REVIEW_TIMEOUT"
       | "acceptDataset"
       | "auctionBidders"
       | "auctionCount"
       | "auctions"
+      | "cancelAuction"
       | "commitBid"
       | "commitments"
       | "computeCommitment"
       | "createAuction"
       | "feeRecipient"
+      | "finalizeRefundTimeout"
       | "finalizeSettlement"
       | "getAuctionState"
       | "markUnderReview"
+      | "owner"
       | "pendingRefunds"
+      | "refundRequestedAt"
       | "requestRefund"
       | "resolveRefund"
       | "revealBid"
       | "reviewer"
+      | "setFeeRecipient"
+      | "setReviewer"
       | "settleAuction"
+      | "transferOwnership"
       | "withdrawRefund"
   ): FunctionFragment;
 
   getEvent(
     nameOrSignatureOrTopic:
+      | "AuctionCancelled"
       | "AuctionCompleted"
       | "AuctionCreated"
       | "AuctionSettledToInspection"
       | "BidCommitted"
       | "BidRevealed"
       | "DatasetAccepted"
+      | "FeeRecipientUpdated"
+      | "NonRevealPenaltyCollected"
+      | "OwnershipTransferred"
       | "RefundAvailable"
       | "RefundClaimed"
       | "RefundRequested"
       | "RefundResolved"
+      | "RefundReviewTimedOut"
+      | "ReviewerUpdated"
   ): EventFragment;
 
   encodeFunctionData(
@@ -68,7 +84,19 @@ export interface VeilV3Interface extends Interface {
     values?: undefined
   ): string;
   encodeFunctionData(
+    functionFragment: "MAX_BIDDERS_PER_AUCTION",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "NON_REVEAL_PENALTY_PERCENT",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
     functionFragment: "PLATFORM_FEE_BPS",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "REVIEW_TIMEOUT",
     values?: undefined
   ): string;
   encodeFunctionData(
@@ -85,6 +113,10 @@ export interface VeilV3Interface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "auctions",
+    values: [BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "cancelAuction",
     values: [BigNumberish]
   ): string;
   encodeFunctionData(
@@ -116,6 +148,10 @@ export interface VeilV3Interface extends Interface {
     values?: undefined
   ): string;
   encodeFunctionData(
+    functionFragment: "finalizeRefundTimeout",
+    values: [BigNumberish]
+  ): string;
+  encodeFunctionData(
     functionFragment: "finalizeSettlement",
     values: [BigNumberish]
   ): string;
@@ -127,9 +163,14 @@ export interface VeilV3Interface extends Interface {
     functionFragment: "markUnderReview",
     values: [BigNumberish]
   ): string;
+  encodeFunctionData(functionFragment: "owner", values?: undefined): string;
   encodeFunctionData(
     functionFragment: "pendingRefunds",
     values: [AddressLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "refundRequestedAt",
+    values: [BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "requestRefund",
@@ -145,8 +186,20 @@ export interface VeilV3Interface extends Interface {
   ): string;
   encodeFunctionData(functionFragment: "reviewer", values?: undefined): string;
   encodeFunctionData(
+    functionFragment: "setFeeRecipient",
+    values: [AddressLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "setReviewer",
+    values: [AddressLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "settleAuction",
     values: [BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "transferOwnership",
+    values: [AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "withdrawRefund",
@@ -158,7 +211,19 @@ export interface VeilV3Interface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "MAX_BIDDERS_PER_AUCTION",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "NON_REVEAL_PENALTY_PERCENT",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "PLATFORM_FEE_BPS",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "REVIEW_TIMEOUT",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -174,6 +239,10 @@ export interface VeilV3Interface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "auctions", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "cancelAuction",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(functionFragment: "commitBid", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "commitments",
@@ -192,6 +261,10 @@ export interface VeilV3Interface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "finalizeRefundTimeout",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "finalizeSettlement",
     data: BytesLike
   ): Result;
@@ -203,8 +276,13 @@ export interface VeilV3Interface extends Interface {
     functionFragment: "markUnderReview",
     data: BytesLike
   ): Result;
+  decodeFunctionResult(functionFragment: "owner", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "pendingRefunds",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "refundRequestedAt",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -218,13 +296,38 @@ export interface VeilV3Interface extends Interface {
   decodeFunctionResult(functionFragment: "revealBid", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "reviewer", data: BytesLike): Result;
   decodeFunctionResult(
+    functionFragment: "setFeeRecipient",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "setReviewer",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "settleAuction",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "transferOwnership",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
     functionFragment: "withdrawRefund",
     data: BytesLike
   ): Result;
+}
+
+export namespace AuctionCancelledEvent {
+  export type InputTuple = [auctionId: BigNumberish, seller: AddressLike];
+  export type OutputTuple = [auctionId: bigint, seller: string];
+  export interface OutputObject {
+    auctionId: bigint;
+    seller: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
 }
 
 export namespace AuctionCompletedEvent {
@@ -374,6 +477,60 @@ export namespace DatasetAcceptedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
+export namespace FeeRecipientUpdatedEvent {
+  export type InputTuple = [
+    previousFeeRecipient: AddressLike,
+    newFeeRecipient: AddressLike
+  ];
+  export type OutputTuple = [
+    previousFeeRecipient: string,
+    newFeeRecipient: string
+  ];
+  export interface OutputObject {
+    previousFeeRecipient: string;
+    newFeeRecipient: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace NonRevealPenaltyCollectedEvent {
+  export type InputTuple = [
+    auctionId: BigNumberish,
+    recipient: AddressLike,
+    amount: BigNumberish
+  ];
+  export type OutputTuple = [
+    auctionId: bigint,
+    recipient: string,
+    amount: bigint
+  ];
+  export interface OutputObject {
+    auctionId: bigint;
+    recipient: string;
+    amount: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace OwnershipTransferredEvent {
+  export type InputTuple = [previousOwner: AddressLike, newOwner: AddressLike];
+  export type OutputTuple = [previousOwner: string, newOwner: string];
+  export interface OutputObject {
+    previousOwner: string;
+    newOwner: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
 export namespace RefundAvailableEvent {
   export type InputTuple = [account: AddressLike, amount: BigNumberish];
   export type OutputTuple = [account: string, amount: bigint];
@@ -444,6 +601,40 @@ export namespace RefundResolvedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
+export namespace RefundReviewTimedOutEvent {
+  export type InputTuple = [
+    auctionId: BigNumberish,
+    winner: AddressLike,
+    amount: BigNumberish
+  ];
+  export type OutputTuple = [auctionId: bigint, winner: string, amount: bigint];
+  export interface OutputObject {
+    auctionId: bigint;
+    winner: string;
+    amount: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace ReviewerUpdatedEvent {
+  export type InputTuple = [
+    previousReviewer: AddressLike,
+    newReviewer: AddressLike
+  ];
+  export type OutputTuple = [previousReviewer: string, newReviewer: string];
+  export interface OutputObject {
+    previousReviewer: string;
+    newReviewer: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
 export interface VeilV3 extends BaseContract {
   connect(runner?: ContractRunner | null): VeilV3;
   waitForDeployment(): Promise<this>;
@@ -489,7 +680,13 @@ export interface VeilV3 extends BaseContract {
 
   BPS_DENOMINATOR: TypedContractMethod<[], [bigint], "view">;
 
+  MAX_BIDDERS_PER_AUCTION: TypedContractMethod<[], [bigint], "view">;
+
+  NON_REVEAL_PENALTY_PERCENT: TypedContractMethod<[], [bigint], "view">;
+
   PLATFORM_FEE_BPS: TypedContractMethod<[], [bigint], "view">;
+
+  REVIEW_TIMEOUT: TypedContractMethod<[], [bigint], "view">;
 
   acceptDataset: TypedContractMethod<
     [auctionId: BigNumberish],
@@ -551,6 +748,12 @@ export interface VeilV3 extends BaseContract {
     "view"
   >;
 
+  cancelAuction: TypedContractMethod<
+    [auctionId: BigNumberish],
+    [void],
+    "nonpayable"
+  >;
+
   commitBid: TypedContractMethod<
     [auctionId: BigNumberish, commitment: BytesLike],
     [void],
@@ -597,6 +800,12 @@ export interface VeilV3 extends BaseContract {
 
   feeRecipient: TypedContractMethod<[], [string], "view">;
 
+  finalizeRefundTimeout: TypedContractMethod<
+    [auctionId: BigNumberish],
+    [void],
+    "nonpayable"
+  >;
+
   finalizeSettlement: TypedContractMethod<
     [auctionId: BigNumberish],
     [void],
@@ -615,7 +824,15 @@ export interface VeilV3 extends BaseContract {
     "nonpayable"
   >;
 
+  owner: TypedContractMethod<[], [string], "view">;
+
   pendingRefunds: TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
+
+  refundRequestedAt: TypedContractMethod<
+    [arg0: BigNumberish],
+    [bigint],
+    "view"
+  >;
 
   requestRefund: TypedContractMethod<
     [auctionId: BigNumberish, evidenceHash: string],
@@ -637,8 +854,26 @@ export interface VeilV3 extends BaseContract {
 
   reviewer: TypedContractMethod<[], [string], "view">;
 
+  setFeeRecipient: TypedContractMethod<
+    [newFeeRecipient: AddressLike],
+    [void],
+    "nonpayable"
+  >;
+
+  setReviewer: TypedContractMethod<
+    [newReviewer: AddressLike],
+    [void],
+    "nonpayable"
+  >;
+
   settleAuction: TypedContractMethod<
     [auctionId: BigNumberish],
+    [void],
+    "nonpayable"
+  >;
+
+  transferOwnership: TypedContractMethod<
+    [newOwner: AddressLike],
     [void],
     "nonpayable"
   >;
@@ -653,7 +888,16 @@ export interface VeilV3 extends BaseContract {
     nameOrSignature: "BPS_DENOMINATOR"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
+    nameOrSignature: "MAX_BIDDERS_PER_AUCTION"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "NON_REVEAL_PENALTY_PERCENT"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
     nameOrSignature: "PLATFORM_FEE_BPS"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "REVIEW_TIMEOUT"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
     nameOrSignature: "acceptDataset"
@@ -716,6 +960,9 @@ export interface VeilV3 extends BaseContract {
     "view"
   >;
   getFunction(
+    nameOrSignature: "cancelAuction"
+  ): TypedContractMethod<[auctionId: BigNumberish], [void], "nonpayable">;
+  getFunction(
     nameOrSignature: "commitBid"
   ): TypedContractMethod<
     [auctionId: BigNumberish, commitment: BytesLike],
@@ -767,6 +1014,9 @@ export interface VeilV3 extends BaseContract {
     nameOrSignature: "feeRecipient"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
+    nameOrSignature: "finalizeRefundTimeout"
+  ): TypedContractMethod<[auctionId: BigNumberish], [void], "nonpayable">;
+  getFunction(
     nameOrSignature: "finalizeSettlement"
   ): TypedContractMethod<[auctionId: BigNumberish], [void], "nonpayable">;
   getFunction(
@@ -776,8 +1026,14 @@ export interface VeilV3 extends BaseContract {
     nameOrSignature: "markUnderReview"
   ): TypedContractMethod<[auctionId: BigNumberish], [void], "nonpayable">;
   getFunction(
+    nameOrSignature: "owner"
+  ): TypedContractMethod<[], [string], "view">;
+  getFunction(
     nameOrSignature: "pendingRefunds"
   ): TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "refundRequestedAt"
+  ): TypedContractMethod<[arg0: BigNumberish], [bigint], "view">;
   getFunction(
     nameOrSignature: "requestRefund"
   ): TypedContractMethod<
@@ -803,12 +1059,28 @@ export interface VeilV3 extends BaseContract {
     nameOrSignature: "reviewer"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
+    nameOrSignature: "setFeeRecipient"
+  ): TypedContractMethod<[newFeeRecipient: AddressLike], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "setReviewer"
+  ): TypedContractMethod<[newReviewer: AddressLike], [void], "nonpayable">;
+  getFunction(
     nameOrSignature: "settleAuction"
   ): TypedContractMethod<[auctionId: BigNumberish], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "transferOwnership"
+  ): TypedContractMethod<[newOwner: AddressLike], [void], "nonpayable">;
   getFunction(
     nameOrSignature: "withdrawRefund"
   ): TypedContractMethod<[], [void], "nonpayable">;
 
+  getEvent(
+    key: "AuctionCancelled"
+  ): TypedContractEvent<
+    AuctionCancelledEvent.InputTuple,
+    AuctionCancelledEvent.OutputTuple,
+    AuctionCancelledEvent.OutputObject
+  >;
   getEvent(
     key: "AuctionCompleted"
   ): TypedContractEvent<
@@ -852,6 +1124,27 @@ export interface VeilV3 extends BaseContract {
     DatasetAcceptedEvent.OutputObject
   >;
   getEvent(
+    key: "FeeRecipientUpdated"
+  ): TypedContractEvent<
+    FeeRecipientUpdatedEvent.InputTuple,
+    FeeRecipientUpdatedEvent.OutputTuple,
+    FeeRecipientUpdatedEvent.OutputObject
+  >;
+  getEvent(
+    key: "NonRevealPenaltyCollected"
+  ): TypedContractEvent<
+    NonRevealPenaltyCollectedEvent.InputTuple,
+    NonRevealPenaltyCollectedEvent.OutputTuple,
+    NonRevealPenaltyCollectedEvent.OutputObject
+  >;
+  getEvent(
+    key: "OwnershipTransferred"
+  ): TypedContractEvent<
+    OwnershipTransferredEvent.InputTuple,
+    OwnershipTransferredEvent.OutputTuple,
+    OwnershipTransferredEvent.OutputObject
+  >;
+  getEvent(
     key: "RefundAvailable"
   ): TypedContractEvent<
     RefundAvailableEvent.InputTuple,
@@ -879,8 +1172,33 @@ export interface VeilV3 extends BaseContract {
     RefundResolvedEvent.OutputTuple,
     RefundResolvedEvent.OutputObject
   >;
+  getEvent(
+    key: "RefundReviewTimedOut"
+  ): TypedContractEvent<
+    RefundReviewTimedOutEvent.InputTuple,
+    RefundReviewTimedOutEvent.OutputTuple,
+    RefundReviewTimedOutEvent.OutputObject
+  >;
+  getEvent(
+    key: "ReviewerUpdated"
+  ): TypedContractEvent<
+    ReviewerUpdatedEvent.InputTuple,
+    ReviewerUpdatedEvent.OutputTuple,
+    ReviewerUpdatedEvent.OutputObject
+  >;
 
   filters: {
+    "AuctionCancelled(uint256,address)": TypedContractEvent<
+      AuctionCancelledEvent.InputTuple,
+      AuctionCancelledEvent.OutputTuple,
+      AuctionCancelledEvent.OutputObject
+    >;
+    AuctionCancelled: TypedContractEvent<
+      AuctionCancelledEvent.InputTuple,
+      AuctionCancelledEvent.OutputTuple,
+      AuctionCancelledEvent.OutputObject
+    >;
+
     "AuctionCompleted(uint256,address,uint256,uint256)": TypedContractEvent<
       AuctionCompletedEvent.InputTuple,
       AuctionCompletedEvent.OutputTuple,
@@ -947,6 +1265,39 @@ export interface VeilV3 extends BaseContract {
       DatasetAcceptedEvent.OutputObject
     >;
 
+    "FeeRecipientUpdated(address,address)": TypedContractEvent<
+      FeeRecipientUpdatedEvent.InputTuple,
+      FeeRecipientUpdatedEvent.OutputTuple,
+      FeeRecipientUpdatedEvent.OutputObject
+    >;
+    FeeRecipientUpdated: TypedContractEvent<
+      FeeRecipientUpdatedEvent.InputTuple,
+      FeeRecipientUpdatedEvent.OutputTuple,
+      FeeRecipientUpdatedEvent.OutputObject
+    >;
+
+    "NonRevealPenaltyCollected(uint256,address,uint256)": TypedContractEvent<
+      NonRevealPenaltyCollectedEvent.InputTuple,
+      NonRevealPenaltyCollectedEvent.OutputTuple,
+      NonRevealPenaltyCollectedEvent.OutputObject
+    >;
+    NonRevealPenaltyCollected: TypedContractEvent<
+      NonRevealPenaltyCollectedEvent.InputTuple,
+      NonRevealPenaltyCollectedEvent.OutputTuple,
+      NonRevealPenaltyCollectedEvent.OutputObject
+    >;
+
+    "OwnershipTransferred(address,address)": TypedContractEvent<
+      OwnershipTransferredEvent.InputTuple,
+      OwnershipTransferredEvent.OutputTuple,
+      OwnershipTransferredEvent.OutputObject
+    >;
+    OwnershipTransferred: TypedContractEvent<
+      OwnershipTransferredEvent.InputTuple,
+      OwnershipTransferredEvent.OutputTuple,
+      OwnershipTransferredEvent.OutputObject
+    >;
+
     "RefundAvailable(address,uint256)": TypedContractEvent<
       RefundAvailableEvent.InputTuple,
       RefundAvailableEvent.OutputTuple,
@@ -989,6 +1340,28 @@ export interface VeilV3 extends BaseContract {
       RefundResolvedEvent.InputTuple,
       RefundResolvedEvent.OutputTuple,
       RefundResolvedEvent.OutputObject
+    >;
+
+    "RefundReviewTimedOut(uint256,address,uint256)": TypedContractEvent<
+      RefundReviewTimedOutEvent.InputTuple,
+      RefundReviewTimedOutEvent.OutputTuple,
+      RefundReviewTimedOutEvent.OutputObject
+    >;
+    RefundReviewTimedOut: TypedContractEvent<
+      RefundReviewTimedOutEvent.InputTuple,
+      RefundReviewTimedOutEvent.OutputTuple,
+      RefundReviewTimedOutEvent.OutputObject
+    >;
+
+    "ReviewerUpdated(address,address)": TypedContractEvent<
+      ReviewerUpdatedEvent.InputTuple,
+      ReviewerUpdatedEvent.OutputTuple,
+      ReviewerUpdatedEvent.OutputObject
+    >;
+    ReviewerUpdated: TypedContractEvent<
+      ReviewerUpdatedEvent.InputTuple,
+      ReviewerUpdatedEvent.OutputTuple,
+      ReviewerUpdatedEvent.OutputObject
     >;
   };
 }

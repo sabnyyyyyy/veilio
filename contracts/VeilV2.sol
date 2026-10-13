@@ -221,9 +221,10 @@ contract VeilV2 {
                     if (b.revealed) {
                         refund = b.deposit;
                     } else {
-                        // 5% penalty for non-reveal
+                        // 5% penalty for non-reveal, credited to feeRecipient (not stranded)
                         uint256 penalty = (b.deposit * 5) / 100;
                         refund = b.deposit - penalty;
+                        _creditPenalty(penalty);
                     }
                     if (refund > 0) {
                         pendingRefunds[bidder] += refund;
@@ -260,6 +261,7 @@ contract VeilV2 {
             } else {
                 uint256 penalty = (b.deposit * 5) / 100;
                 uint256 netRefund = b.deposit - penalty;
+                _creditPenalty(penalty);
                 if (netRefund > 0) {
                     pendingRefunds[bidder] += netRefund;
                     emit RefundAvailable(bidder, netRefund);
@@ -268,6 +270,12 @@ contract VeilV2 {
         }
 
         emit AuctionSettledToInspection(auctionId, auction.highestBidder, winningPrice, auction.inspectionEndTime);
+    }
+
+    function _creditPenalty(uint256 penalty) internal {
+        if (penalty == 0 || feeRecipient == address(0)) return;
+        pendingRefunds[feeRecipient] += penalty;
+        emit RefundAvailable(feeRecipient, penalty);
     }
 
     function acceptDataset(uint256 auctionId) external nonReentrant {

@@ -21,11 +21,13 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import type { ServiceListing } from '@/lib/server/servicesDb';
+import { isSolanaWalletAddress, useServicesWalletAuth } from '@/components/services/useServicesWalletAuth';
 
 export default function ServiceDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { address, isConnected } = useAccount();
+  const { address: evmAddress, isConnected: evmConnected } = useAccount();
+  const { getSession } = useServicesWalletAuth();
 
   const serviceId = String(params.id);
 
@@ -56,6 +58,19 @@ export default function ServiceDetailPage() {
   }, [serviceId]);
 
   const handleStartConversation = async () => {
+    if (!service) return;
+    // Buyers chat with a wallet of the listing's chain family (Solana sellers -> Phantom).
+    let address: string | undefined = evmAddress;
+    if (isSolanaWalletAddress(service.sellerId)) {
+      const provider = typeof window !== 'undefined' ? (window as any).solana : null;
+      if (!provider) {
+        alert('This provider uses a Solana wallet. Please install/connect Phantom to message them.');
+        return;
+      }
+      const res = provider.publicKey ? { publicKey: provider.publicKey } : await provider.connect();
+      address = res.publicKey.toString();
+    }
+    const isConnected = Boolean(address) && (isSolanaWalletAddress(address) || evmConnected);
     if (!isConnected || !address) {
       alert('Please connect your Web3 wallet first to message the seller.');
       return;
@@ -70,14 +85,15 @@ export default function ServiceDetailPage() {
 
     try {
       setStartingChat(true);
+      const session = await getSession(address);
       const res = await fetch('/api/conversations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           buyerAddress: address,
-          sellerAddress: service.sellerId,
           serviceId: service.id,
           serviceTitle: service.title,
+          auth: session,
         }),
       });
 
@@ -119,7 +135,7 @@ export default function ServiceDetailPage() {
   }
 
   const isAgent = service.sellerType === 'agent';
-  const isOwner = address && address.toLowerCase() === service.sellerId.toLowerCase();
+  const isOwner = evmAddress && evmAddress.toLowerCase() === service.sellerId.toLowerCase();
 
   return (
     <div className="w-full pb-20 selection:bg-[#C9A45C]/30">

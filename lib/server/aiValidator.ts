@@ -136,7 +136,11 @@ export function runDeterministicValidation(input: TransactionValidationInput): G
   let severityCountHigh = 0;
 
   // 1. Delivery & Deliverable Verification
-  if (!input.delivery) {
+  const deliveryExpected = !input.contractState || [
+    'Inspection', 'RefundRequested', 'UnderReview', 'Completed', 'Refunded',
+  ].includes(input.contractState.stateName);
+
+  if (!input.delivery && deliveryExpected) {
     findings.push({
       category: 'delivery',
       description: 'No delivery record or deliverable payload submitted by seller yet.',
@@ -146,7 +150,7 @@ export function runDeterministicValidation(input: TransactionValidationInput): G
     });
     missingEvidence.push('Seller asset upload or deliverable manifest');
     severityCountHigh++;
-  } else {
+  } else if (input.delivery) {
     // Check manifest vs listing criteria for dataset
     if (input.listing.expectedRecordCount && input.delivery.manifest?.recordCount !== undefined) {
       if (input.delivery.manifest.recordCount < input.listing.expectedRecordCount) {

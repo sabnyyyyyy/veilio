@@ -6,6 +6,22 @@ pragma solidity ^0.8.20;
  * @notice Trustless Sealed First-Price Auction Marketplace with Dataset Inspection & Dispute Review.
  * @dev Enforces state machine transitions, sealed keccak256 maximum bids, exact first-price pricing,
  * non-reveal penalties, dataset inspection window, refund requests, and review finalization.
+ *
+ * Security notes (next-deployment hardening):
+ * - Refund review timeout: once a winner calls `requestRefund`, the reviewer has `REVIEW_TIMEOUT`
+ *   (7 days, measured from the request) to resolve it. After that anyone may call
+ *   `finalizeRefundTimeout`, which resolves the dispute in the winner's favour (full refund of the
+ *   winning price; NFTs go back to the seller). This mirrors `finalize_refund_timeout` in the Solana
+ *   `veilio-auction` program, so an absent reviewer can never lock the winner's funds.
+ * - Non-reveal penalty: the 5% anti-abort penalty withheld from unrevealed deposits is credited to
+ *   `feeRecipient` (platform treasury) via `pendingRefunds`, so no value is stranded. It is not paid
+ *   to the seller on purpose: a seller-controlled sock-puppet bidder could otherwise commit and
+ *   never reveal at zero cost (the penalty would flow back to the seller).
+ * - Bounded settlement: at most `MAX_BIDDERS_PER_AUCTION` commitments per auction, so the refund
+ *   loop in `settleAuction` has a fixed gas ceiling.
+ * - Admin: `owner` (deployer) can rotate `reviewer` / `feeRecipient` (non-zero only) and transfer
+ *   ownership. Constructor rejects zero addresses.
+ * - Seller may `cancelAuction` while no bid has been committed (uses the `Cancelled` state).
  */
 contract VeilV3 {
     enum AuctionState { Created, Bidding, Revealing, Inspection, RefundRequested, UnderReview, Completed, Refunded, Cancelled }
@@ -46,8 +62,16 @@ contract VeilV3 {
 
     address public reviewer; // Centralized VEIL reviewer for MVP
     address public feeRecipient; // Destination for platform fees
+    address public owner; // Admin able to rotate reviewer / feeRecipient
     uint256 public constant PLATFORM_FEE_BPS = 1000; // 10%
     uint256 public constant BPS_DENOMINATOR = 10000;
+    uint256 public constant NON_REVEAL_PENALTY_PERCENT = 5; // anti-abort penalty, credited to feeRecipient
+    uint256 public constant REVIEW_TIMEOUT = 7 days; // reviewer deadline, measured from requestRefund
+    uint256 public constant MAX_BIDDERS_PER_AUCTION = 100; // bounds the settleAuction refund loop
+
+    // Timestamp at which the winner requested a refund (kept outside the Auction struct so the
+    // public `auctions(...)` getter ABI used by existing clients is unchanged).
+    mapping(uint256 => uint256) public refundRequestedAt;
     
     // Reentrancy Guard
     uint256 private _status;
@@ -64,6 +88,12 @@ contract VeilV3 {
     event RefundRequested(uint256 indexed auctionId, address indexed winner, string evidenceHash);
     event RefundResolved(uint256 indexed auctionId, bool approved, string reason);
     event AuctionCompleted(uint256 indexed auctionId, address indexed seller, uint256 sellerAmount, uint256 platformFee);
+    event AuctionCancelled(uint256 indexed auctionId, address indexed seller);
+    event NonRevealPenaltyCollected(uint256 indexed auctionId, address indexed recipient, uint256 amount);
+    event RefundReviewTimedOut(uint256 indexed auctionId, address indexed winner, uint256 amount);
+    event ReviewerUpdated(address indexed previousReviewer, address indexed newReviewer);
+    event FeeRecipientUpdated(address indexed previousFeeRecipient, address indexed newFeeRecipient);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
     modifier nonReentrant() {
         require(_status != _ENTERED, "ReentrancyGuard: reentrant call");
@@ -77,10 +107,39 @@ contract VeilV3 {
         _;
     }
 
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not authorized: Owner only");
+        _;
+    }
+
     constructor(address _reviewer, address _feeRecipient) {
+        require(_reviewer != address(0), "Invalid reviewer");
+        require(_feeRecipient != address(0), "Invalid fee recipient");
         _status = _NOT_ENTERED;
         reviewer = _reviewer;
         feeRecipient = _feeRecipient;
+        owner = msg.sender;
+        emit OwnershipTransferred(address(0), msg.sender);
+    }
+
+    function setReviewer(address newReviewer) external onlyOwner {
+        require(newReviewer != address(0), "Invalid reviewer");
+        emit ReviewerUpdated(reviewer, newReviewer);
+        reviewer = newReviewer;
+    }
+
+    /// @notice Future platform fees and non-reveal penalties go to the new recipient. Amounts already
+    ///         credited to the previous recipient stay withdrawable by it.
+    function setFeeRecipient(address newFeeRecipient) external onlyOwner {
+        require(newFeeRecipient != address(0), "Invalid fee recipient");
+        emit FeeRecipientUpdated(feeRecipient, newFeeRecipient);
+        feeRecipient = newFeeRecipient;
+    }
+
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "Invalid owner");
+        emit OwnershipTransferred(owner, newOwner);
+        owner = newOwner;
     }
 
     function getAuctionState(uint256 auctionId) public view returns (AuctionState) {
@@ -130,6 +189,7 @@ contract VeilV3 {
         require(commitDuration >= 60, "Commit duration too short");
         require(revealDuration >= 60, "Reveal duration too short");
         require(inspectionDuration >= 3600, "Inspection duration too short (min 1h)");
+        require(startingPrice > 0, "Starting price must be positive");
 
         auctionCount++;
         auctionId = auctionCount;
@@ -161,9 +221,12 @@ contract VeilV3 {
     function commitBid(uint256 auctionId, bytes32 commitment) external payable nonReentrant {
         Auction storage auction = auctions[auctionId];
         require(auction.id != 0, "Auction does not exist");
+        require(auction.state == AuctionState.Created, "Auction is not open for bids");
         require(block.timestamp < auction.commitEndTime, "Bidding phase has ended");
         require(msg.sender != auction.seller, "Seller cannot bid on own auction");
+        require(msg.value > 0, "Deposit must be positive");
         require(msg.value >= auction.startingPrice, "Deposit below reserve/starting price");
+        require(auction.bidderCount < MAX_BIDDERS_PER_AUCTION, "Bidder limit reached");
         require(commitment != bytes32(0), "Invalid commitment");
         require(commitments[auctionId][msg.sender].commitment == bytes32(0), "Already committed");
 
@@ -227,10 +290,11 @@ contract VeilV3 {
 
         // If no valid revealed bids, cancel
         if (auction.highestBidder == address(0)) {
-            _onNoWinner(auctionId);
             auction.state = AuctionState.Completed; // No winner, just complete
-            
+            _onNoWinner(auctionId);
+
             address[] memory allBidders = auctionBidders[auctionId];
+            uint256 noWinnerPenalties;
             for (uint256 i = 0; i < allBidders.length; i++) {
                 address bidder = allBidders[i];
                 BidCommitment memory b = commitments[auctionId][bidder];
@@ -239,8 +303,9 @@ contract VeilV3 {
                     if (b.revealed) {
                         refund = b.deposit;
                     } else {
-                        // 5% penalty for non-reveal
-                        uint256 penalty = (b.deposit * 5) / 100;
+                        // 5% penalty for non-reveal (credited to feeRecipient below)
+                        uint256 penalty = (b.deposit * NON_REVEAL_PENALTY_PERCENT) / 100;
+                        noWinnerPenalties += penalty;
                         refund = b.deposit - penalty;
                     }
                     if (refund > 0) {
@@ -249,6 +314,7 @@ contract VeilV3 {
                     }
                 }
             }
+            _creditPenalties(auctionId, noWinnerPenalties);
             emit AuctionCompleted(auctionId, address(0), 0, 0);
             return;
         }
@@ -260,6 +326,7 @@ contract VeilV3 {
 
         // Refund losing bidders, winner gets NO overpayment refund
         address[] memory bidders = auctionBidders[auctionId];
+        uint256 penalties;
         for (uint256 i = 0; i < bidders.length; i++) {
             address bidder = bidders[i];
             BidCommitment memory b = commitments[auctionId][bidder];
@@ -279,7 +346,8 @@ contract VeilV3 {
                     emit RefundAvailable(bidder, b.deposit);
                 }
             } else {
-                uint256 penalty = (b.deposit * 5) / 100;
+                uint256 penalty = (b.deposit * NON_REVEAL_PENALTY_PERCENT) / 100;
+                penalties += penalty;
                 uint256 netRefund = b.deposit - penalty;
                 if (netRefund > 0) {
                     pendingRefunds[bidder] += netRefund;
@@ -287,6 +355,7 @@ contract VeilV3 {
                 }
             }
         }
+        _creditPenalties(auctionId, penalties);
 
         emit AuctionSettledToInspection(auctionId, auction.highestBidder, winningPrice, auction.inspectionEndTime);
     }
@@ -308,6 +377,7 @@ contract VeilV3 {
 
         auction.state = AuctionState.RefundRequested;
         auction.evidenceHash = evidenceHash;
+        refundRequestedAt[auctionId] = block.timestamp;
 
         emit RefundRequested(auctionId, msg.sender, evidenceHash);
     }
@@ -323,13 +393,8 @@ contract VeilV3 {
         Auction storage auction = auctions[auctionId];
         require(auction.state == AuctionState.UnderReview, "Refund must be UnderReview to resolve");
 
-        uint256 winningPrice = auction.highestBid;
-
         if (approved) {
-            _onRefundApproved(auctionId);
-            auction.state = AuctionState.Refunded;
-            pendingRefunds[auction.highestBidder] += winningPrice;
-            emit RefundAvailable(auction.highestBidder, winningPrice);
+            _approveRefund(auctionId);
         } else {
             require(bytes(reason).length > 0, "Must provide a rejection reason");
             auction.reviewReason = reason;
@@ -338,6 +403,41 @@ contract VeilV3 {
         }
 
         emit RefundResolved(auctionId, approved, reason);
+    }
+
+    /**
+     * @notice Resolves a refund request the reviewer did not decide within REVIEW_TIMEOUT.
+     * @dev Callable by anyone. Default outcome = refund approved (winner gets the full winning price
+     *      back, an escrowed NFT returns to the seller, no platform fee), matching the Solana program's
+     *      `finalize_refund_timeout`. Applies to both RefundRequested and UnderReview.
+     */
+    function finalizeRefundTimeout(uint256 auctionId) external virtual nonReentrant {
+        Auction storage auction = auctions[auctionId];
+        require(
+            auction.state == AuctionState.RefundRequested || auction.state == AuctionState.UnderReview,
+            "No refund pending review"
+        );
+        require(block.timestamp >= refundRequestedAt[auctionId] + REVIEW_TIMEOUT, "Review period still active");
+
+        _approveRefund(auctionId);
+        emit RefundReviewTimedOut(auctionId, auction.highestBidder, auction.highestBid);
+        emit RefundResolved(auctionId, true, "Reviewer timeout");
+    }
+
+    /**
+     * @notice Seller cancels an auction that has not received any commitment.
+     * @dev Escrowed NFTs (VeilNFTV4) are returned to the seller.
+     */
+    function cancelAuction(uint256 auctionId) external virtual nonReentrant {
+        Auction storage auction = auctions[auctionId];
+        require(auction.id != 0, "Auction does not exist");
+        require(msg.sender == auction.seller, "Only seller can cancel");
+        require(auction.state == AuctionState.Created, "Auction cannot be cancelled");
+        require(auction.bidderCount == 0, "Auction already has bids");
+
+        auction.state = AuctionState.Cancelled;
+        _onCancel(auctionId);
+        emit AuctionCancelled(auctionId, msg.sender);
     }
 
     function finalizeSettlement(uint256 auctionId) external virtual nonReentrant {
@@ -369,7 +469,24 @@ contract VeilV3 {
         emit AuctionCompleted(auctionId, auction.seller, sellerAmount, platformFee);
     }
 
+    function _approveRefund(uint256 auctionId) internal {
+        Auction storage auction = auctions[auctionId];
+        auction.state = AuctionState.Refunded;
+        _onRefundApproved(auctionId);
+        uint256 winningPrice = auction.highestBid;
+        pendingRefunds[auction.highestBidder] += winningPrice;
+        emit RefundAvailable(auction.highestBidder, winningPrice);
+    }
+
+    function _creditPenalties(uint256 auctionId, uint256 amount) internal {
+        if (amount == 0) return;
+        pendingRefunds[feeRecipient] += amount;
+        emit RefundAvailable(feeRecipient, amount);
+        emit NonRevealPenaltyCollected(auctionId, feeRecipient, amount);
+    }
+
     function _beforeSuccessfulSettlement(uint256) internal virtual {}
+    function _onCancel(uint256) internal virtual {}
     function _onRefundApproved(uint256) internal virtual {}
     function _onNoWinner(uint256) internal virtual {}
 

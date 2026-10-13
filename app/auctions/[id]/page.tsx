@@ -9,18 +9,56 @@ import DeliveryReviewPanel from '@/components/transaction/DeliveryReviewPanel';
 import DisputeModal from '@/components/transaction/DisputeModal';
 import type { GeminiValidationOutput } from '@/lib/server/gemini';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { useAccount, usePublicClient, useWriteContract, useSignMessage } from 'wagmi';
+import { useParams, useSearchParams } from 'next/navigation';
+import { useAccount, usePublicClient, useWriteContract, useSignMessage, useChainId, useSwitchChain } from 'wagmi';
 import { formatEther, parseEther } from 'viem';
 
-import { VEIL_V3_ABI, VEIL_V3_CONTRACT_ADDRESS, VEIL_V4_CONTRACT_ADDRESS } from '@/lib/contract';
+import { getAuctionContractConfig } from '@/lib/contract';
 import Countdown from '@/components/Countdown';
 import { resolveIpfsUri } from '@/lib/ipfs';
 import { computeCommitmentHash, generateRandomSecret } from '@/lib/commitment';
-import { getBidSecret, saveBidSecret } from '@/lib/secretStorage';
-import { bnbChain } from '@/lib/chain';
+import {
+  confirmBidSecret,
+  discardPendingBidSecret,
+  exportBidSecrets,
+  findBidSecretForCommitment,
+  getBidSecret,
+  saveBidSecret,
+  savePendingBidSecret,
+  type StoredSecret,
+} from '@/lib/secretStorage';
+import { baseSepoliaChain, bnbChain } from '@/lib/chain';
 import { decryptDatasetClientSide, triggerDownload, unpackEncryptedAssetBundle } from '@/lib/client/decryption';
-import { datasetDownloadMessage, datasetInspectMessage, datasetPreviewMessage } from '@/lib/assetAuth';
+import {
+  auctionPlatformFeeBps,
+  datasetDownloadMessageFor,
+  datasetInspectMessageFor,
+  datasetPreviewMessageFor,
+  noWinnerRefundText,
+  sameWallet,
+  type AuctionNetworkId,
+} from '@/lib/auctionNetwork';
+import { buildAuctionAuth, connectSolanaWallet, sendSolanaAuctionInstructions, signForNetwork } from '@/lib/client/auctionWallet';
+import {
+  computeSealedBidCommitment,
+  createAcceptDatasetInstruction,
+  createClaimRefundInstruction,
+  createCommitBidInstruction,
+  createFinalizeInspectionTimeoutInstruction,
+  createFinalizeRefundTimeoutInstruction,
+  createRequestRefundInstruction,
+  createRevealBidInstruction,
+  createSettleAuctionInstruction,
+  findAuctionPda,
+  getSolanaAuctionProgramId,
+} from '@/lib/cross-chain/solanaAuction';
+import {
+  fetchSolanaAuctionStateById,
+  fetchSolanaBidCommitment,
+  formatSolLamports,
+  SOLANA_DEFAULT_PUBKEY,
+} from '@/lib/solanaAuctions';
+import type { DecodedBidCommitment } from '@/lib/cross-chain/solanaAuction';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -42,6 +80,30 @@ interface AuctionData {
   evidenceHash: string;
   inspectionEndTime: bigint;
   reviewReason: string;
+  /** Solana only: per-auction reviewer and refund request time (unix seconds). */
+  reviewer?: string;
+  refundRequestedAt?: bigint;
+}
+
+/** Solana program: reviewer has 7 days to decide before the winner can reclaim escrow. */
+const SOLANA_REFUND_REVIEW_TIMEOUT_SECONDS = 7 * 24 * 60 * 60;
+
+/** True when the wallet definitely did not send the transaction (user rejected the prompt). */
+function isUserRejection(err: unknown): boolean {
+  let current: any = err;
+  for (let depth = 0; current && depth < 6; depth++) {
+    if (current.name === 'UserRejectedRequestError' || current.code === 4001 || current.code === 'ACTION_REJECTED') return true;
+    const message = typeof current.message === 'string' ? current.message : '';
+    if (/user rejected|user denied|rejected the request|request rejected/i.test(message)) return true;
+    current = current.cause;
+  }
+  return false;
+}
+
+function bytes32FromHex(value: string): Buffer {
+  const hex = value.startsWith('0x') ? value.slice(2) : value;
+  if (!/^[0-9a-fA-F]{64}$/.test(hex)) throw new Error('Evidence hash must be a 32-byte hex value.');
+  return Buffer.from(hex, 'hex');
 }
 
 interface AssetMetadata {
@@ -123,7 +185,7 @@ function normalizeSamplePreview(value: unknown): AssetMetadata['samplePreview'] 
 }
 
 /** Parse a contract/wallet error into a readable user-facing message. */
-function parseError(err: unknown, action = 'transaction'): string {
+function parseError(err: unknown, action = 'transaction', chainName = 'BNB Chain Testnet', symbol = 'BNB'): string {
   if (!(err instanceof Error)) return 'Transaction failed.';
   const m = err.message;
   if (m.includes('Seller cannot bid') || m.includes('own auction'))
@@ -143,9 +205,9 @@ function parseError(err: unknown, action = 'transaction'): string {
   if (m.includes('rejected') || m.includes('denied') || m.includes('user rejected'))
     return 'Transaction rejected by wallet.';
   if (m.includes('insufficient') || m.includes('Insufficient'))
-    return 'Insufficient BNB balance for gas.';
+    return `Insufficient ${symbol} balance for gas.`;
   if (m.toLowerCase().includes('requested resource not available') || m.toLowerCase().includes('resource unavailable'))
-    return `The wallet or BNB Testnet RPC could not prepare the ${action} transaction. It may not have been submitted. Check that your wallet is on BNB Smart Chain Testnet, then retry shortly.`;
+    return `The wallet or ${chainName} RPC could not prepare the ${action} transaction. It may not have been submitted. Check that your wallet is on ${chainName}, then retry shortly.`;
   if (m.includes('reverted on-chain'))
     return 'Transaction was reverted by the contract.';
   return m.length > 200 ? m.substring(0, 200) + '…' : m;
@@ -157,11 +219,52 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 export default function AuctionDetailPage() {
   const params = useParams();
-  const publicClient = usePublicClient();
+  const searchParams = useSearchParams();
+  const networkParam = searchParams?.get('network');
+  const isSolana = networkParam === 'solana' || networkParam === 'solana:devnet';
+  const isBase = networkParam === 'base';
+  const targetChainId = isBase ? baseSepoliaChain.id : bnbChain.id;
+  const publicClient = usePublicClient({ chainId: targetChainId });
+  const auctionContract = getAuctionContractConfig(targetChainId);
+  const walletChainId = useChainId();
+  const { switchChain } = useSwitchChain();
+  const currencySymbol = isSolana ? 'SOL' : isBase ? 'ETH' : 'BNB';
+  const explorerBase = isSolana
+    ? 'https://explorer.solana.com'
+    : isBase
+    ? baseSepoliaChain.blockExplorers.default.url
+    : bnbChain.blockExplorers.default.url;
+  const explorerName = isSolana ? 'Solana Explorer' : isBase ? 'BaseScan' : 'BscScan';
+  const networkName = isSolana ? 'Solana Devnet' : isBase ? 'Base Sepolia' : 'BNB Chain Testnet';
+  const networkId: AuctionNetworkId = isSolana ? 'solana:devnet' : isBase ? 'base:84532' : 'bnb:97';
   const { address, isConnected } = useAccount();
   const { writeContractAsync } = useWriteContract();
 
+  // ── Solana wallet (Phantom-style injected provider) ──────────────────
+  const [solanaWallet, setSolanaWallet] = useState<string | null>(null);
+  const [solanaCommitment, setSolanaCommitment] = useState<DecodedBidCommitment | null>(null);
+  const [solanaCommitmentLoaded, setSolanaCommitmentLoaded] = useState(false);
+  useEffect(() => {
+    if (!isSolana || typeof window === 'undefined') return;
+    const provider = (window as any).solana;
+    const existing = provider?.publicKey?.toString?.();
+    if (existing) { setSolanaWallet(existing); return; }
+    provider?.connect?.({ onlyIfTrusted: true })
+      .then((resp: any) => { const key = resp?.publicKey?.toString?.(); if (key) setSolanaWallet(key); })
+      .catch(() => {});
+  }, [isSolana]);
+  const ensureSolanaWallet = useCallback(async () => {
+    const key = await connectSolanaWallet();
+    setSolanaWallet(key);
+    return key;
+  }, []);
+  /** The wallet that acts on this auction: Solana wallet on Solana, wagmi account on EVM. */
+  const viewerAddress = isSolana ? solanaWallet : (address ?? null);
+  const viewerConnected = isSolana ? !!solanaWallet : isConnected && !!address;
+  const formatAmount = (value: bigint) => (isSolana ? formatSolLamports(value) : formatEther(value));
+
   const auctionId = params?.id ? String(params.id) : '';
+  const secretStorageAuctionId = isSolana ? `solana:devnet:${auctionId}` : targetChainId === bnbChain.id ? auctionId : `${targetChainId}:${auctionId}`;
 
   // ── Auction data ─────────────────────────────────────────────────────
   const [auction, setAuction] = useState<AuctionData | null>(null);
@@ -187,24 +290,24 @@ export default function AuctionDetailPage() {
   const [maxBidInput, setMaxBidInput] = useState('');
   const [depositInput, setDepositInput] = useState('');
   const [commitStatus, setCommitStatus] = useState<'idle' | 'confirming' | 'success' | 'error'>('idle');
-  const [commitTxHash, setCommitTxHash] = useState<`0x${string}` | null>(null);
+  const [commitTxHash, setCommitTxHash] = useState<string | null>(null);
   const [commitError, setCommitError] = useState<string | null>(null);
   const [committedMaxBid, setCommittedMaxBid] = useState<string>('');
   const [committedDeposit, setCommittedDeposit] = useState<string>('');
 
   // ── Reveal state ─────────────────────────────────────────────────────
   const [revealStatus, setRevealStatus] = useState<'idle' | 'confirming' | 'success' | 'error'>('idle');
-  const [revealTxHash, setRevealTxHash] = useState<`0x${string}` | null>(null);
+  const [revealTxHash, setRevealTxHash] = useState<string | null>(null);
   const [revealError, setRevealError] = useState<string | null>(null);
 
   // ── Settle state ─────────────────────────────────────────────────────
   const [settleStatus, setSettleStatus] = useState<'idle' | 'confirming' | 'success' | 'error'>('idle');
-  const [settleTxHash, setSettleTxHash] = useState<`0x${string}` | null>(null);
+  const [settleTxHash, setSettleTxHash] = useState<string | null>(null);
   const [settleError, setSettleError] = useState<string | null>(null);
 
   // ── Withdraw state ───────────────────────────────────────────────────
   const [withdrawStatus, setWithdrawStatus] = useState<'idle' | 'confirming' | 'success' | 'error'>('idle');
-  const [withdrawTxHash, setWithdrawTxHash] = useState<`0x${string}` | null>(null);
+  const [withdrawTxHash, setWithdrawTxHash] = useState<string | null>(null);
   const [withdrawError, setWithdrawError] = useState<string | null>(null);
 
   // ── Unlock / Download state ──────────────────────────────────────────
@@ -214,67 +317,105 @@ export default function AuctionDetailPage() {
 
   // ── Load auction from chain ──────────────────────────────────────────
   const loadAuction = useCallback(async (quiet = false) => {
-    if (!publicClient || !auctionId) return;
+    if (!auctionId) return;
+    if (!isSolana && !publicClient) return;
 
     try {
       if (!quiet) setLoading(true);
       setError(null);
       setImageError(false);
 
-      const raw = await publicClient.readContract({
-        address: VEIL_V3_CONTRACT_ADDRESS,
-        abi: VEIL_V3_ABI,
-        functionName: 'auctions',
-        args: [BigInt(auctionId)],
-      });
+      let data: AuctionData;
+      let imageURI: string;
 
-      let id, seller, itemName, description, imageURI;
-      let startingPrice, commitEndTime, revealEndTime;
-      let inspectionDuration, inspectionEndTime;
-      let state, highestBidder, highestBid;
-      let bidderCount, revealedCount, finalTxHash, evidenceHash, reviewReason;
-
-      const values = raw as any[];
-
-      if (values.length === 15) {
-        // BlindBid V1 fallback
-        [
-          id, seller, itemName, description, imageURI,
-          startingPrice, commitEndTime, revealEndTime,
-          state, highestBidder, highestBid,
-          bidderCount, revealedCount, finalTxHash
-        ] = values;
-        
-        inspectionDuration = BigInt(0);
-        inspectionEndTime = BigInt(0);
-        evidenceHash = '';
-        reviewReason = '';
+      if (isSolana) {
+        const decoded = await fetchSolanaAuctionStateById(auctionId);
+        if (!decoded) {
+          throw new Error(`Auction #${auctionId} not found on Solana Devnet.`);
+        }
+        // Normalize to the EVM numbering used below: Created/Bidding/Revealing => 0 (active).
+        const rawState = Number(decoded.state);
+        data = {
+          id: decoded.auctionId,
+          seller: decoded.seller,
+          itemName: decoded.itemName,
+          description: decoded.description,
+          imageURI: decoded.imageUri,
+          startingPrice: decoded.startingPrice,
+          commitEndTime: BigInt(decoded.commitEndTime),
+          revealEndTime: BigInt(decoded.revealEndTime),
+          inspectionEndTime: BigInt(decoded.inspectionEndTime),
+          state: rawState <= 2 ? 0 : rawState,
+          highestBidder: decoded.highestBidder === SOLANA_DEFAULT_PUBKEY ? '' : decoded.highestBidder,
+          highestBid: decoded.highestBid,
+          bidderCount: BigInt(decoded.bidderCount),
+          revealedCount: BigInt(decoded.revealedCount),
+          finalTxHash: '',
+          evidenceHash: decoded.evidenceHash,
+          reviewReason: decoded.reviewReason,
+          reviewer: decoded.reviewer,
+          refundRequestedAt: BigInt(decoded.refundRequestedAt),
+        };
+        imageURI = decoded.imageUri;
       } else {
-        // VeilV3 format
-        [
-          id, seller, itemName, description, imageURI,
+        if (!publicClient) return;
+
+        const raw = await publicClient.readContract({
+          address: auctionContract.address,
+          abi: auctionContract.abi,
+          functionName: 'auctions',
+          args: [BigInt(auctionId)],
+        });
+
+        let id, seller, itemName, description, rawImageURI;
+        let startingPrice, commitEndTime, revealEndTime;
+        let inspectionDuration, inspectionEndTime;
+        let state, highestBidder, highestBid;
+        let bidderCount, revealedCount, finalTxHash, evidenceHash, reviewReason;
+
+        const values = raw as any[];
+
+        if (values.length === 15) {
+          // BlindBid V1 fallback
+          [
+            id, seller, itemName, description, rawImageURI,
+            startingPrice, commitEndTime, revealEndTime,
+            state, highestBidder, highestBid,
+            bidderCount, revealedCount, finalTxHash
+          ] = values;
+        
+          inspectionDuration = BigInt(0);
+          inspectionEndTime = BigInt(0);
+          evidenceHash = '';
+          reviewReason = '';
+        } else {
+          // VeilV3 format
+          [
+            id, seller, itemName, description, rawImageURI,
+            startingPrice, commitEndTime, revealEndTime,
+            inspectionDuration, inspectionEndTime,
+            state, highestBidder, highestBid,
+            bidderCount, revealedCount, finalTxHash, evidenceHash, reviewReason
+          ] = values;
+        }
+
+        if (Number(id) === 0) throw new Error(`Auction not found on ${targetChainId === baseSepoliaChain.id ? 'Base Sepolia' : 'BNB Chain'}.`);
+
+        data = {
+          id, seller, itemName, description, imageURI: rawImageURI,
           startingPrice, commitEndTime, revealEndTime,
-          inspectionDuration, inspectionEndTime,
-          state, highestBidder, highestBid,
+          inspectionEndTime, state, highestBidder, highestBid,
           bidderCount, revealedCount, finalTxHash, evidenceHash, reviewReason
-        ] = values;
+        };
+        imageURI = rawImageURI;
+
+        console.log('[AuctionDetail] On-chain:', {
+          id: id.toString(), state,
+          commitEndTime: commitEndTime.toString(),
+          revealEndTime: revealEndTime.toString(),
+          highestBidder, highestBid: highestBid.toString(),
+        });
       }
-
-      if (Number(id) === 0) throw new Error('Auction not found on BNB Chain.');
-
-      const data: AuctionData = {
-        id, seller, itemName, description, imageURI,
-        startingPrice, commitEndTime, revealEndTime,
-        inspectionEndTime, state, highestBidder, highestBid,
-        bidderCount, revealedCount, finalTxHash, evidenceHash, reviewReason
-      };
-
-      console.log('[AuctionDetail] On-chain:', {
-        id: id.toString(), state,
-        commitEndTime: commitEndTime.toString(),
-        revealEndTime: revealEndTime.toString(),
-        highestBidder, highestBid: highestBid.toString(),
-      });
 
       setAuction(data);
 
@@ -309,9 +450,9 @@ export default function AuctionDetailPage() {
               ...(asset.assetType === 'dataset' ? { samplePreview: normalizeSamplePreview(asset.samplePreview) } : {}),
             };
             setDatasetMeta(publicAsset);
-            if (publicAsset.assetType === 'nft' && VEIL_V4_CONTRACT_ADDRESS) {
+            if (!isSolana && publicClient && publicAsset.assetType === 'nft' && auctionContract.address) {
               try {
-                const nft = await publicClient.readContract({ address: VEIL_V3_CONTRACT_ADDRESS, abi: VEIL_V3_ABI, functionName: 'nftAssets', args: [BigInt(auctionId)] }) as readonly [number, string, bigint, bigint, boolean, boolean];
+                const nft = await publicClient.readContract({ address: auctionContract.address, abi: auctionContract.abi, functionName: 'nftAssets', args: [BigInt(auctionId)] }) as readonly [number, string, bigint, bigint, boolean, boolean];
                 setNftDeliveryState(nft[5] ? 'Delivered to the winning bidder' : nft[4] ? 'Held in VEILIO escrow' : 'Not currently held in escrow');
               } catch {
                 setNftDeliveryState('Unable to read NFT escrow status');
@@ -327,18 +468,33 @@ export default function AuctionDetailPage() {
       setResolvedImageUrl(resolvedUrl);
     } catch (err) {
       console.error('[AuctionDetail] Load error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load auction from BNB Chain.');
+      setError(err instanceof Error ? err.message : `Failed to load auction from ${targetChainId === baseSepoliaChain.id ? 'Base Sepolia' : 'BNB Chain'}.`);
     } finally {
       if (!quiet) setLoading(false);
     }
-  }, [publicClient, auctionId]);
+  }, [publicClient, auctionId, auctionContract.address, auctionContract.abi, targetChainId, isSolana]);
 
   useEffect(() => { loadAuction(); }, [loadAuction]);
+
+  // ── Solana: the viewer's bid commitment PDA (null once refunded/paid out) ──
+  const loadSolanaCommitment = useCallback(async () => {
+    if (!isSolana || !solanaWallet || !auctionId) return;
+    try {
+      setSolanaCommitment(await fetchSolanaBidCommitment(auctionId, solanaWallet));
+    } catch (e) {
+      console.warn('[Solana] Failed to read bid commitment:', e);
+      setSolanaCommitment(null);
+    } finally {
+      setSolanaCommitmentLoaded(true);
+    }
+  }, [isSolana, solanaWallet, auctionId]);
+
+  useEffect(() => { void loadSolanaCommitment(); }, [loadSolanaCommitment, auction?.state]);
 
   useEffect(() => {
     if (!auctionId || datasetMeta?.assetType !== 'dataset' || datasetMeta.samplePreview) return;
     let cancelled = false;
-    void fetch(`/api/datasets/preview?auctionId=${encodeURIComponent(auctionId)}`, { cache: 'no-store' })
+    void fetch(`/api/datasets/preview?auctionId=${encodeURIComponent(auctionId)}&network=${encodeURIComponent(networkId)}`, { cache: 'no-store' })
       .then(async (response) => response.ok ? response.json() : null)
       .then((data) => {
         const preview = normalizeSamplePreview(data?.preview);
@@ -346,19 +502,20 @@ export default function AuctionDetailPage() {
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [auctionId, datasetMeta?.assetType, datasetMeta?.samplePreview]);
+  }, [auctionId, datasetMeta?.assetType, datasetMeta?.samplePreview, networkId]);
 
   async function handlePublishPreview() {
-    if (!address || !isConnected) { setPreviewError('Connect the seller wallet first.'); return; }
     setPreviewPublishing(true);
     setPreviewError(null);
     try {
+      const signer = isSolana ? await ensureSolanaWallet() : address;
+      if (!signer || (!isSolana && !isConnected)) throw new Error('Connect the seller wallet first.');
       const timestamp = Date.now();
-      const message = datasetPreviewMessage({ auctionId, address, timestamp });
-      const signature = await signMessageAsync({ message });
+      const message = datasetPreviewMessageFor(networkId, { auctionId, address: signer, timestamp });
+      const signature = await signForNetwork(networkId, message, signMessageAsync);
       const response = await fetch('/api/datasets/preview', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ auctionId, address, signature, timestamp }),
+        body: JSON.stringify({ auctionId, address: signer, signature, timestamp, network: networkId }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Could not publish the preview.');
@@ -379,7 +536,7 @@ export default function AuctionDetailPage() {
   }, [datasetMeta?.assetType, loadAuction]);
 
   useEffect(() => {
-    if (!auctionId) return;
+    if (!auctionId || targetChainId !== bnbChain.id) return;
     try {
       let visitorId = localStorage.getItem('veil_viewer_id');
       if (!visitorId) {
@@ -391,16 +548,17 @@ export default function AuctionDetailPage() {
         body: JSON.stringify({ auctionId, visitorId }),
       });
     } catch (error) { console.warn('Could not record listing view', error); }
-  }, [auctionId]);
+  }, [auctionId, targetChainId]);
 
   // ── Read pending refund from chain ───────────────────────────────────
   const loadPendingRefund = useCallback(async () => {
-    if (!publicClient || !address) return;
+    // Solana has no pull-payment ledger; refunds are claimed per commitment PDA.
+    if (isSolana || !publicClient || !address) return;
     try {
       setRefundLoading(true);
       const refund = await publicClient.readContract({
-        address: VEIL_V3_CONTRACT_ADDRESS,
-        abi: VEIL_V3_ABI,
+        address: auctionContract.address,
+        abi: auctionContract.abi,
         functionName: 'pendingRefunds',
         args: [address],
       }) as bigint;
@@ -412,7 +570,7 @@ export default function AuctionDetailPage() {
     } finally {
       setRefundLoading(false);
     }
-  }, [publicClient, address]);
+  }, [isSolana, publicClient, address, auctionContract.address, auctionContract.abi]);
 
   // Load refund whenever auction is settled and wallet is connected
   useEffect(() => {
@@ -427,8 +585,6 @@ export default function AuctionDetailPage() {
   // ── COMMIT handler ───────────────────────────────────────────────────
   async function handleCommit() {
     setCommitError(null);
-    if (!isConnected || !address) { setCommitError('Please connect your wallet first.'); return; }
-    if (!publicClient) { setCommitError('Blockchain client unavailable.'); return; }
     if (!auction) { setCommitError('Auction data not loaded yet.'); return; }
 
     const maxBidTrimmed = maxBidInput.trim();
@@ -438,60 +594,256 @@ export default function AuctionDetailPage() {
       return;
     }
 
+    if (isSolana) {
+      let pendingSecret: StoredSecret | null = null;
+      try {
+        setCommitStatus('confirming');
+        const bidderPubkey = await ensureSolanaWallet();
+
+        const maxBidLamports = BigInt(Math.round(parseFloat(maxBidTrimmed) * 1e9));
+        const depositLamports = BigInt(Math.round(parseFloat(depositTrimmed) * 1e9));
+        if (maxBidLamports <= 0n) throw new Error('Maximum bid must be greater than zero.');
+        if (maxBidLamports < auction.startingPrice) throw new Error(`Maximum bid must be at least ${formatSolLamports(auction.startingPrice)} SOL.`);
+        if (depositLamports < maxBidLamports) throw new Error('Public deposit must be equal to or greater than your maximum bid.');
+
+        const salt = new Uint8Array(32);
+        window.crypto.getRandomValues(salt);
+
+        const programId = getSolanaAuctionProgramId();
+        const { pda: auctionPda } = findAuctionPda(auction.id, programId);
+        const commitment = computeSealedBidCommitment({
+          auctionPubkey: auctionPda,
+          bidderPubkey,
+          maxBidLamports,
+          salt,
+        });
+
+        // Persist the salt BEFORE sending; savePendingBidSecret throws if storage fails.
+        const candidate: StoredSecret = {
+          auctionId: secretStorageAuctionId,
+          bidder: bidderPubkey,
+          maxBid: maxBidTrimmed,
+          secret: (`0x${Buffer.from(salt).toString('hex')}` as `0x${string}`),
+          commitment: (`0x${commitment.toString('hex')}` as `0x${string}`),
+          timestamp: Date.now(),
+          networkId: 'solana:devnet',
+        };
+        savePendingBidSecret(candidate);
+        pendingSecret = candidate;
+
+        const inst = createCommitBidInstruction({
+          auctionId: auction.id,
+          bidder: bidderPubkey,
+          commitment,
+          depositLamports,
+          programId,
+        });
+        const signature = await sendSolanaAuctionInstructions([inst], bidderPubkey, 'Solana bid commitment');
+        confirmBidSecret(secretStorageAuctionId, bidderPubkey, signature);
+
+        setCommitTxHash(signature);
+        setCommittedMaxBid(maxBidTrimmed);
+        setCommittedDeposit(depositTrimmed);
+        setCommitStatus('success');
+        void loadAuction(true);
+        void loadSolanaCommitment();
+      } catch (err: any) {
+        console.error('Solana commit error:', err);
+        if (pendingSecret && isUserRejection(err)) {
+          discardPendingBidSecret(pendingSecret.auctionId, pendingSecret.bidder, pendingSecret.commitment);
+        }
+        setCommitError(
+          pendingSecret && !isUserRejection(err)
+            ? `${err?.message || 'Failed to submit commitment on Solana Devnet.'} Your bid secret was kept locally in case the transaction landed; download a backup before retrying.`
+            : err?.message || 'Failed to submit commitment on Solana Devnet.'
+        );
+        setCommitStatus('error');
+      }
+      return;
+    }
+
+    if (!isConnected || !address) { setCommitError('Please connect your wallet first.'); return; }
+    if (!publicClient) { setCommitError('Blockchain client unavailable.'); return; }
+
+    if (walletChainId !== targetChainId) {
+      if (switchChain) {
+        try {
+          await switchChain({ chainId: targetChainId });
+        } catch {
+          setCommitError(`Please switch your wallet to ${networkName} before bidding.`);
+          return;
+        }
+      } else {
+        setCommitError(`Please switch your wallet to ${networkName} before bidding.`);
+        return;
+      }
+    }
+
+    let pendingSecret: StoredSecret | null = null;
+    let submittedHash: `0x${string}` | null = null;
     try {
       setCommitStatus('confirming');
       const secret = generateRandomSecret();
       const maxBidWei = parseEther(maxBidTrimmed);
       const depositWei = parseEther(depositTrimmed);
       if (maxBidWei <= 0n) throw new Error('Maximum bid must be greater than zero.');
-      if (maxBidWei < auction.startingPrice) throw new Error(`Maximum bid must be at least ${formatEther(auction.startingPrice)} BNB.`);
+      if (maxBidWei < auction.startingPrice) throw new Error(`Maximum bid must be at least ${formatEther(auction.startingPrice)} ${currencySymbol}.`);
       if (depositWei < maxBidWei) throw new Error('Public deposit must be equal to or greater than your maximum bid.');
       const commitment = computeCommitmentHash(auction.id, address, maxBidTrimmed, secret);
 
       console.log('[CommitBid] auctionId:', auction.id.toString());
       console.log('[CommitBid] bidder:', address);
-      console.log('[CommitBid] maxBid:', maxBidTrimmed, 'BNB; public deposit:', depositTrimmed, 'BNB');
+      console.log('[CommitBid] maxBid:', maxBidTrimmed, currencySymbol, '; public deposit:', depositTrimmed, currencySymbol);
       console.log('[CommitBid] commitment:', commitment);
+
+      // Persist the secret BEFORE the wallet prompt: if the tx lands but the
+      // receipt never arrives (RPC timeout, closed tab) the bid can still be revealed.
+      const candidate: StoredSecret = {
+        auctionId: secretStorageAuctionId,
+        bidder: address,
+        maxBid: maxBidTrimmed,
+        secret,
+        commitment,
+        timestamp: Date.now(),
+        networkId,
+        chainId: targetChainId,
+      };
+      savePendingBidSecret(candidate);
+      pendingSecret = candidate;
 
       // commitBid(uint256 auctionId, bytes32 commitment) payable
       const hash = await writeContractAsync({
-        address: VEIL_V3_CONTRACT_ADDRESS,
-        abi: VEIL_V3_ABI,
+        chainId: targetChainId,
+        address: auctionContract.address,
+        abi: auctionContract.abi,
         functionName: 'commitBid',
         args: [auction.id, commitment],
         value: depositWei,
       });
+      submittedHash = hash;
+      saveBidSecret({ ...pendingSecret, status: 'pending', txHash: hash });
 
       console.log('[CommitBid] Tx submitted:', hash);
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
       console.log('[CommitBid] Receipt status:', receipt.status);
 
       if (receipt.status !== 'success') {
+        // A mined-but-reverted commit stored nothing on-chain: safe to drop the secret.
+        discardPendingBidSecret(pendingSecret.auctionId, pendingSecret.bidder, pendingSecret.commitment);
+        pendingSecret = null;
         throw new Error(`Transaction reverted on-chain (tx: ${hash}).`);
       }
 
-      saveBidSecret({ auctionId, bidder: address, maxBid: maxBidTrimmed, secret, commitment, timestamp: Date.now() });
+      confirmBidSecret(secretStorageAuctionId, address, hash);
       setCommitTxHash(hash);
       setCommittedMaxBid(maxBidTrimmed);
       setCommittedDeposit(depositTrimmed);
       setCommitStatus('success');
     } catch (err: unknown) {
       console.error('[CommitBid] Error:', err);
-      setCommitError(parseError(err, 'bid commitment'));
+      const rejected = !submittedHash && isUserRejection(err);
+      if (pendingSecret && rejected) {
+        discardPendingBidSecret(pendingSecret.auctionId, pendingSecret.bidder, pendingSecret.commitment);
+      }
+      const base = parseError(err, 'bid commitment', networkName, currencySymbol);
+      setCommitError(
+        pendingSecret && !rejected
+          ? `${base} Your bid secret was kept locally in case the transaction was mined${submittedHash ? ` (tx: ${submittedHash})` : ''}; download a backup before retrying.`
+          : base
+      );
       setCommitStatus('error');
+    }
+  }
+
+  function handleDownloadSecretBackup() {
+    try {
+      const json = exportBidSecrets(viewerAddress || undefined);
+      const blob = new Blob([json], { type: 'application/json' });
+      triggerDownload(blob, `veilio-bid-secrets-${Date.now()}.json`);
+    } catch (err) {
+      console.error('[SecretBackup] Export failed:', err);
     }
   }
 
   // ── REVEAL handler ───────────────────────────────────────────────────
   async function handleReveal() {
     setRevealError(null);
-    if (!isConnected || !address) { setRevealError('Please connect your wallet first.'); return; }
-    if (!publicClient) { setRevealError('Blockchain client unavailable.'); return; }
     if (!auction) { setRevealError('Auction data not loaded yet.'); return; }
 
-    const stored = getBidSecret(auctionId, address);
+    if (isSolana) {
+      try {
+        setRevealStatus('confirming');
+        const bidderPubkey = await ensureSolanaWallet();
+
+        // Use the stored salt whose commitment matches the on-chain commitment PDA.
+        const onchain = await fetchSolanaBidCommitment(auction.id, bidderPubkey);
+        if (!onchain) throw new Error('No on-chain bid commitment was found for this Solana wallet.');
+        const stored = findBidSecretForCommitment(secretStorageAuctionId, bidderPubkey, onchain.commitment);
+        if (!stored) {
+          throw new Error('No saved bid secret matches your on-chain commitment for this auction and Solana wallet. Import your bid secret backup and retry.');
+        }
+
+        const saltHex = stored.secret.startsWith('0x') ? stored.secret.slice(2) : stored.secret;
+        const salt = Buffer.from(saltHex, 'hex');
+        const maxBidLamports = BigInt(Math.round(parseFloat(stored.maxBid) * 1e9));
+
+        const programId = getSolanaAuctionProgramId();
+        const inst = createRevealBidInstruction({
+          auctionId: auction.id,
+          bidder: bidderPubkey,
+          maxBidLamports,
+          salt,
+          programId,
+        });
+        const signature = await sendSolanaAuctionInstructions([inst], bidderPubkey, 'Solana bid reveal');
+
+        saveBidSecret({ ...stored, auctionId: secretStorageAuctionId, status: 'confirmed', revealed: true });
+        setRevealTxHash(signature);
+        setRevealStatus('success');
+        void loadAuction(true);
+        void loadSolanaCommitment();
+      } catch (err: any) {
+        console.error('Solana reveal error:', err);
+        setRevealError(err?.message || 'Failed to reveal bid on Solana Devnet.');
+        setRevealStatus('error');
+      }
+      return;
+    }
+
+    if (!isConnected || !address) { setRevealError('Please connect your wallet first.'); return; }
+    if (!publicClient) { setRevealError('Blockchain client unavailable.'); return; }
+
+    if (walletChainId !== targetChainId) {
+      if (switchChain) {
+        try {
+          await switchChain({ chainId: targetChainId });
+        } catch {
+          setRevealError(`Please switch your wallet to ${networkName} before revealing.`);
+          return;
+        }
+      } else {
+        setRevealError(`Please switch your wallet to ${networkName} before revealing.`);
+        return;
+      }
+    }
+
+    let stored = getBidSecret(secretStorageAuctionId, address);
+    try {
+      // Pick the locally stored secret that matches the on-chain commitment
+      // (handles retries where an older pending secret is the one that landed).
+      const onchain = await publicClient.readContract({
+        address: auctionContract.address,
+        abi: auctionContract.abi,
+        functionName: 'commitments',
+        args: [auction.id, address],
+      }) as readonly [`0x${string}`, bigint, boolean, bigint];
+      const matched = findBidSecretForCommitment(secretStorageAuctionId, address, onchain[0]);
+      if (matched) stored = matched;
+    } catch (e) {
+      console.warn('[RevealBid] Could not read on-chain commitment; using the latest stored secret.', e);
+    }
     if (!stored) {
-      setRevealError('No committed bid found for this wallet. You must commit before revealing.');
+      setRevealError('No committed bid found for this wallet. You must commit before revealing (or import your bid secret backup).');
       return;
     }
 
@@ -499,7 +851,7 @@ export default function AuctionDetailPage() {
 
     console.log('[RevealBid] auctionId:', auctionId);
     console.log('[RevealBid] bidder:', address);
-    console.log('[RevealBid] original maxBid:', storedMaxBid, 'BNB');
+    console.log('[RevealBid] original maxBid:', storedMaxBid, currencySymbol);
 
     try {
       setRevealStatus('confirming');
@@ -507,8 +859,9 @@ export default function AuctionDetailPage() {
 
       // revealBid(uint256 auctionId, uint256 maxBid, bytes32 secret) nonpayable
       const hash = await writeContractAsync({
-        address: VEIL_V3_CONTRACT_ADDRESS,
-        abi: VEIL_V3_ABI,
+        chainId: targetChainId,
+        address: auctionContract.address,
+        abi: auctionContract.abi,
         functionName: 'revealBid',
         args: [auction.id, maxBidWei, storedSecret],
       });
@@ -521,12 +874,12 @@ export default function AuctionDetailPage() {
         throw new Error(`Transaction reverted on-chain (tx: ${hash}).`);
       }
 
-      saveBidSecret({ ...stored, revealed: true });
+      saveBidSecret({ ...stored, auctionId: secretStorageAuctionId, status: 'confirmed', revealed: true });
       setRevealTxHash(hash);
       setRevealStatus('success');
     } catch (err: unknown) {
       console.error('[RevealBid] Error:', err);
-      setRevealError(parseError(err, 'bid reveal'));
+      setRevealError(parseError(err, 'bid reveal', networkName, currencySymbol));
       setRevealStatus('error');
     }
   }
@@ -534,9 +887,47 @@ export default function AuctionDetailPage() {
   // ── SETTLE handler ───────────────────────────────────────────────────
   async function handleSettle() {
     setSettleError(null);
+    if (!auction) { setSettleError('Auction data not loaded yet.'); return; }
+
+    if (isSolana) {
+      try {
+        setSettleStatus('confirming');
+        const callerPubkey = await ensureSolanaWallet();
+
+        const programId = getSolanaAuctionProgramId();
+        const inst = createSettleAuctionInstruction({
+          auctionId: auction.id,
+          programId,
+        });
+        const signature = await sendSolanaAuctionInstructions([inst], callerPubkey, 'Solana settle');
+
+        setSettleTxHash(signature);
+        setSettleStatus('success');
+        void loadAuction(true);
+      } catch (err: any) {
+        console.error('Solana settle error:', err);
+        setSettleError(err?.message || 'Failed to settle auction on Solana Devnet.');
+        setSettleStatus('error');
+      }
+      return;
+    }
+
     if (!isConnected || !address) { setSettleError('Please connect your wallet first.'); return; }
     if (!publicClient) { setSettleError('Blockchain client unavailable.'); return; }
-    if (!auction) { setSettleError('Auction data not loaded yet.'); return; }
+
+    if (walletChainId !== targetChainId) {
+      if (switchChain) {
+        try {
+          await switchChain({ chainId: targetChainId });
+        } catch {
+          setSettleError(`Please switch your wallet to ${networkName} before settling.`);
+          return;
+        }
+      } else {
+        setSettleError(`Please switch your wallet to ${networkName} before settling.`);
+        return;
+      }
+    }
 
     console.log('[SettleAuction] auctionId:', auctionId);
 
@@ -545,8 +936,9 @@ export default function AuctionDetailPage() {
 
       // settleAuction(uint256 auctionId) nonpayable — permissionless
       const hash = await writeContractAsync({
-        address: VEIL_V3_CONTRACT_ADDRESS,
-        abi: VEIL_V3_ABI,
+        chainId: targetChainId,
+        address: auctionContract.address,
+        abi: auctionContract.abi,
         functionName: 'settleAuction',
         args: [auction.id],
       });
@@ -570,7 +962,7 @@ export default function AuctionDetailPage() {
       await loadPendingRefund();
     } catch (err: unknown) {
       console.error('[SettleAuction] Error:', err);
-      setSettleError(parseError(err, 'auction settlement'));
+      setSettleError(parseError(err, 'auction settlement', networkName, currencySymbol));
       setSettleStatus('error');
     }
   }
@@ -581,6 +973,20 @@ export default function AuctionDetailPage() {
     if (!isConnected || !address) { setWithdrawError('Please connect your wallet first.'); return; }
     if (!publicClient) { setWithdrawError('Blockchain client unavailable.'); return; }
 
+    if (walletChainId !== targetChainId) {
+      if (switchChain) {
+        try {
+          await switchChain({ chainId: targetChainId });
+        } catch {
+          setWithdrawError(`Please switch your wallet to ${networkName} before withdrawing.`);
+          return;
+        }
+      } else {
+        setWithdrawError(`Please switch your wallet to ${networkName} before withdrawing.`);
+        return;
+      }
+    }
+
     console.log('[WithdrawRefund] address:', address);
 
     try {
@@ -588,8 +994,9 @@ export default function AuctionDetailPage() {
 
       // withdrawRefund() nonpayable — pull-based
       const hash = await writeContractAsync({
-        address: VEIL_V3_CONTRACT_ADDRESS,
-        abi: VEIL_V3_ABI,
+        chainId: targetChainId,
+        address: auctionContract.address,
+        abi: auctionContract.abi,
         functionName: 'withdrawRefund',
         args: [],
       });
@@ -609,7 +1016,7 @@ export default function AuctionDetailPage() {
       await loadPendingRefund();
     } catch (err: unknown) {
       console.error('[WithdrawRefund] Error:', err);
-      setWithdrawError(parseError(err, 'refund withdrawal'));
+      setWithdrawError(parseError(err, 'refund withdrawal', networkName, currencySymbol));
       setWithdrawStatus('error');
     }
   }
@@ -617,14 +1024,15 @@ export default function AuctionDetailPage() {
   // ── UNLOCK / DOWNLOAD handler ──────────────────────────────────────────
   async function handleUnlockDataset() {
     setUnlockError(null);
-    if (!isConnected || !address) { setUnlockError('Please connect your wallet first.'); return; }
+    if (!isSolana && (!isConnected || !address)) { setUnlockError('Please connect your wallet first.'); return; }
     
     try {
       setUnlockStatus('signing');
+      const signer = isSolana ? await ensureSolanaWallet() : address!;
       const timestamp = Date.now();
-      const message = datasetDownloadMessage({ auctionId, address, timestamp });
+      const message = datasetDownloadMessageFor(networkId, { auctionId, address: signer, timestamp });
       
-      const signature = await signMessageAsync({ message });
+      const signature = await signForNetwork(networkId, message, signMessageAsync);
       
       setUnlockStatus('downloading');
       
@@ -633,9 +1041,10 @@ export default function AuctionDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           auctionId,
-          address,
+          address: signer,
           signature,
-          timestamp
+          timestamp,
+          network: networkId,
         })
       });
       
@@ -668,20 +1077,22 @@ export default function AuctionDetailPage() {
 
   // ── INSPECT DATA handler ───────────────────────────────────────────
   const fetchInspectionData = useCallback(async () => {
-    if (!isConnected || !address || !auctionId || !signMessageAsync) return;
+    if (!auctionId) return;
+    if (!isSolana && (!isConnected || !address || !signMessageAsync)) return;
     if (datasetMeta?.deliveryMethod === 'nft-transfer') {
       setInspectionData({ format: 'NFT transfer', recordCount: 0, columnCount: 0 });
       return;
     }
     try {
+      const signer = isSolana ? await ensureSolanaWallet() : address!;
       const timestamp = Date.now();
-      const message = datasetInspectMessage({ auctionId, address, timestamp });
-      const signature = await signMessageAsync({ message });
+      const message = datasetInspectMessageFor(networkId, { auctionId, address: signer, timestamp });
+      const signature = await signForNetwork(networkId, message, signMessageAsync);
       
       const res = await fetch('/api/datasets/inspect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ auctionId, address, signature, timestamp })
+        body: JSON.stringify({ auctionId, address: signer, signature, timestamp, network: networkId })
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -693,7 +1104,7 @@ export default function AuctionDetailPage() {
     } catch (err) {
       console.error("Fetch inspection data failed", err);
     }
-  }, [isConnected, address, auctionId, signMessageAsync, datasetMeta]);
+  }, [isConnected, address, auctionId, signMessageAsync, datasetMeta, networkId, isSolana, ensureSolanaWallet]);
 
   useEffect(() => {
     // We only need inspection data if we're the winner and it's in a state that allows it
@@ -716,7 +1127,7 @@ export default function AuctionDetailPage() {
   const fetchAiValidation = async () => {
     try {
       setAiLoading(true);
-      const res = await fetch(`/api/transactions/${auctionId}/validate`, {
+      const res = await fetch(`/api/transactions/${auctionId}/validate?network=${encodeURIComponent(networkId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
@@ -732,38 +1143,141 @@ export default function AuctionDetailPage() {
     }
   };
 
-  const handleAcceptDataset = async () => {
-    try {
-      if (!address || !publicClient) return;
-      
-      const hash = await writeContractAsync({
-        address: VEIL_V3_CONTRACT_ADDRESS,
-        abi: VEIL_V3_ABI,
-        functionName: 'acceptDataset',
-        args: [BigInt(auctionId)],
-      });
+  // ── Post-settlement lifecycle actions ────────────────────────────────
+  const [lifecycleStatus, setLifecycleStatus] = useState<'idle' | 'confirming' | 'success' | 'error'>('idle');
+  const [lifecycleAction, setLifecycleAction] = useState<string | null>(null);
+  const [lifecycleTxHash, setLifecycleTxHash] = useState<string | null>(null);
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
 
-      await publicClient.waitForTransactionReceipt({ hash });
-      await loadAuction();
-      await loadPendingRefund();
-    } catch (err: any) {
-      console.error(err);
-      alert('Failed to accept dataset: ' + (err.shortMessage || err.message));
+  async function ensureEvmWalletOnTargetChain() {
+    if (!isConnected || !address) throw new Error('Please connect your wallet first.');
+    if (!publicClient) throw new Error('Blockchain client unavailable.');
+    if (walletChainId !== targetChainId) {
+      if (!switchChain) throw new Error(`Please switch your wallet to ${networkName}.`);
+      try {
+        await switchChain({ chainId: targetChainId });
+      } catch {
+        throw new Error(`Please switch your wallet to ${networkName}.`);
+      }
     }
+    return { account: address, client: publicClient };
+  }
+
+  /** Runs one lifecycle transaction with shared status/error handling. */
+  async function runLifecycleAction(label: string, action: () => Promise<string>) {
+    setLifecycleAction(label);
+    setLifecycleError(null);
+    setLifecycleTxHash(null);
+    setLifecycleStatus('confirming');
+    try {
+      const hash = await action();
+      setLifecycleTxHash(hash);
+      setLifecycleStatus('success');
+      await loadAuction(true);
+      await loadPendingRefund();
+      void loadSolanaCommitment();
+    } catch (err: unknown) {
+      console.error(`[${label}] Error:`, err);
+      setLifecycleError(isSolana ? (err instanceof Error ? err.message : `${label} failed.`) : parseError(err, label, networkName, currencySymbol));
+      setLifecycleStatus('error');
+    }
+  }
+
+  async function sendEvmAuctionTx(functionName: 'acceptDataset' | 'finalizeSettlement', label: string) {
+    const { client } = await ensureEvmWalletOnTargetChain();
+    const hash = await writeContractAsync({
+      chainId: targetChainId,
+      address: auctionContract.address,
+      abi: auctionContract.abi,
+      functionName,
+      args: [BigInt(auctionId)],
+    });
+    const receipt = await client.waitForTransactionReceipt({ hash });
+    if (receipt.status !== 'success') throw new Error(`${label} transaction reverted on-chain (tx: ${hash}).`);
+    return hash;
+  }
+
+  const handleAcceptDataset = async () => {
+    if (!auction) return;
+    await runLifecycleAction('accept delivery', async () => {
+      if (isSolana) {
+        const winner = await ensureSolanaWallet();
+        const inst = createAcceptDatasetInstruction({ auctionId: auction.id, seller: auction.seller, winner });
+        return sendSolanaAuctionInstructions([inst], winner, 'Solana accept');
+      }
+      return sendEvmAuctionTx('acceptDataset', 'Accept');
+    });
+  };
+
+  /**
+   * EVM `finalizeSettlement`: anyone may call once the inspection window has
+   * ended without a refund request. Pays the seller (minus the 10% fee) and,
+   * for NFT auctions, releases the escrowed NFT to the winner — the only way
+   * NFT auctions complete, since `acceptDataset` is blocked for NFTs in V4.
+   * Solana equivalent: `finalize_inspection_timeout`.
+   */
+  const handleFinalizeSettlement = async () => {
+    if (!auction) return;
+    await runLifecycleAction('finalize settlement', async () => {
+      if (isSolana) {
+        const caller = await ensureSolanaWallet();
+        const inst = createFinalizeInspectionTimeoutInstruction({ auctionId: auction.id, seller: auction.seller, winner: auction.highestBidder, caller });
+        return sendSolanaAuctionInstructions([inst], caller, 'Solana inspection timeout');
+      }
+      return sendEvmAuctionTx('finalizeSettlement', 'Finalize settlement');
+    });
+  };
+
+  /** Solana: winner reclaims escrow if the reviewer did not decide within 7 days. */
+  const handleFinalizeRefundTimeout = async () => {
+    if (!auction) return;
+    await runLifecycleAction('refund timeout', async () => {
+      const winner = await ensureSolanaWallet();
+      const inst = createFinalizeRefundTimeoutInstruction({ auctionId: auction.id, winner });
+      return sendSolanaAuctionInstructions([inst], winner, 'Solana refund timeout');
+    });
+  };
+
+  /** Solana: losing / unrevealed bidders reclaim their full deposit (no penalty). */
+  const handleClaimSolanaRefund = async () => {
+    if (!auction) return;
+    await runLifecycleAction('claim refund', async () => {
+      const bidder = await ensureSolanaWallet();
+      const inst = createClaimRefundInstruction({ auctionId: auction.id, bidder });
+      return sendSolanaAuctionInstructions([inst], bidder, 'Solana claim refund');
+    });
+  };
+
+  const signAuctionAuth = async (action: string) => {
+    const signer = isSolana ? await ensureSolanaWallet() : address;
+    if (!signer) throw new Error('Please connect your wallet first.');
+    return buildAuctionAuth({ action, networkId, auctionId, address: signer, signEvm: signMessageAsync });
   };
 
   const handleRequestRefund = async (evidenceHash: string) => {
     try {
-      if (!address || !publicClient) return;
-      
+      if (!auction) return;
+      if (isSolana) {
+        const winner = await ensureSolanaWallet();
+        const inst = createRequestRefundInstruction({ auctionId: auction.id, winner, evidenceHash: bytes32FromHex(evidenceHash) });
+        await sendSolanaAuctionInstructions([inst], winner, 'Solana refund request');
+        await loadAuction(true);
+        setShowRefundForm(false);
+        return;
+      }
+
+      // Same VeilNFTV4 ABI on BNB Testnet and Base Sepolia (getAuctionContractConfig).
+      const { client } = await ensureEvmWalletOnTargetChain();
       const hash = await writeContractAsync({
-        address: VEIL_V3_CONTRACT_ADDRESS,
-        abi: VEIL_V3_ABI,
+        chainId: targetChainId,
+        address: auctionContract.address,
+        abi: auctionContract.abi,
         functionName: 'requestRefund',
         args: [BigInt(auctionId), evidenceHash],
       });
 
-      await publicClient.waitForTransactionReceipt({ hash });
+      const receipt = await client.waitForTransactionReceipt({ hash });
+      if (receipt.status !== 'success') throw new Error(`Transaction reverted on-chain (tx: ${hash}).`);
       await loadAuction();
       await loadPendingRefund();
       setShowRefundForm(false);
@@ -777,7 +1291,7 @@ export default function AuctionDetailPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0A0A09] flex items-center justify-center">
-        <p className="text-[#A8A397]">Loading auction from BNB Chain...</p>
+        <p className="text-[#A8A397]">Loading auction from {isSolana ? 'Solana Devnet' : targetChainId === baseSepoliaChain.id ? 'Base Sepolia' : 'BNB Chain'}...</p>
       </div>
     );
   }
@@ -787,7 +1301,7 @@ export default function AuctionDetailPage() {
       <div className="min-h-screen bg-[#0A0A09] px-6 pt-32">
         <div className="max-w-3xl mx-auto rounded-2xl border border-white/10 bg-[#151512] p-12 text-center">
           <h1 className="text-2xl font-bold text-[#F5F2E8]">Auction not found</h1>
-          <p className="mt-4 text-[#A8A397]">{error || 'This auction does not exist on BNB Chain.'}</p>
+          <p className="mt-4 text-[#A8A397]">{error || `This auction does not exist on ${isSolana ? 'Solana Devnet' : targetChainId === baseSepoliaChain.id ? 'Base Sepolia' : 'BNB Chain'}.`}</p>
           <Link href="/auctions" className="inline-block mt-8 text-[#C9A45C] font-semibold">← Back to auctions</Link>
         </div>
       </div>
@@ -802,7 +1316,7 @@ export default function AuctionDetailPage() {
   const isCommitOpen = now < commitEndMs;
   const isRevealOpen = now >= commitEndMs && now < revealEndMs;
 
-  // VeilV2 States: Created=0, Bidding=1, Revealing=2, Inspection=3, RefundRequested=4, UnderReview=5, Completed=6, Refunded=7, Cancelled=8
+  // States: Created/active=0 (Solana Bidding/Revealing normalized to 0), Inspection=3, RefundRequested=4, UnderReview=5, Completed=6, Refunded=7, Cancelled=8
   const isInspectionOnChain = auction.state === 3;
   const isRefundRequestedOnChain = auction.state === 4;
   const isUnderReviewOnChain = auction.state === 5;
@@ -823,21 +1337,29 @@ export default function AuctionDetailPage() {
     : 'Awaiting Settlement';
 
   // Stored secret / reveal status for connected wallet
-  const storedSecret = isConnected && address ? getBidSecret(auctionId, address) : null;
-  const hasCommitted = storedSecret !== null;
-  const alreadyRevealed = storedSecret?.revealed === true;
+  const storedSecret = viewerConnected && viewerAddress ? getBidSecret(secretStorageAuctionId, viewerAddress) : null;
+  const hasCommitted = storedSecret !== null || (isSolana && !!solanaCommitment);
+  const alreadyRevealed = storedSecret?.revealed === true || (isSolana && solanaCommitment?.revealed === true);
 
   // Winner detection — straight from chain data, never from local state
-  const hasWinner = !!auction?.highestBidder && auction.highestBidder !== '0x0000000000000000000000000000000000000000';
-  const isSeller = isConnected && !!address && normalizeAddress(auction?.seller) === normalizeAddress(address);
-  
-  const normalizedWinner = normalizeAddress(auction?.highestBidder);
-  const normalizedAddress = normalizeAddress(address);
+  const hasWinner = !!auction?.highestBidder && auction.highestBidder !== ZERO_ADDRESS;
+  const isSeller = viewerConnected && sameWallet(auction?.seller, viewerAddress, networkId);
+  const isWinner = viewerConnected && hasWinner && sameWallet(auction?.highestBidder, viewerAddress, networkId);
 
-  const isWinner =
-    !!normalizedWinner &&
-    !!normalizedAddress &&
-    normalizedWinner === normalizedAddress;
+  // Inspection / refund windows (on-chain unix seconds)
+  const inspectionEndMs = Number(auction.inspectionEndTime) * 1000;
+  const inspectionWindowOpen = isInspectionOnChain && now <= inspectionEndMs;
+  const inspectionExpired = isInspectionOnChain && inspectionEndMs > 0 && now > inspectionEndMs;
+  const isNftAuction = datasetMeta?.assetType === 'nft' || datasetMeta?.deliveryMethod === 'nft-transfer';
+  const solanaRefundTimeoutMs = isSolana && auction.refundRequestedAt
+    ? (Number(auction.refundRequestedAt) + SOLANA_REFUND_REVIEW_TIMEOUT_SECONDS) * 1000
+    : 0;
+  const canFinalizeRefundTimeout = isSolana && isWinner && isRefundRequestedOnChain && solanaRefundTimeoutMs > 0 && now >= solanaRefundTimeoutMs;
+  // Solana: any non-winning commitment (revealed or not), or the winner's after an approved refund,
+  // can be closed back to the bidder once the auction is settled.
+  const canClaimSolanaRefund = isSolana && !!solanaCommitment && isSettledOrLater && !isCancelledOnChain
+    && (!isWinner || isRefundedOnChain);
+  const platformFeeBps = auctionPlatformFeeBps(networkId);
 
   // First-Price winning price: highestBid
   const winningPrice = auction.highestBid;
@@ -853,6 +1375,14 @@ export default function AuctionDetailPage() {
         >
           ← Back to auctions
         </Link>
+
+        <div className="mb-8 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#12120F] px-4 py-3 text-sm">
+          <span className="text-[#A8A397]">Viewing {isSolana ? 'Solana Devnet' : targetChainId === baseSepoliaChain.id ? 'Base Sepolia' : 'BNB Chain Testnet'} auction · pay in {currencySymbol}</span>
+          {!isSolana && isConnected && walletChainId !== targetChainId && <button type="button" onClick={() => switchChain?.({ chainId: targetChainId })} className="rounded-lg bg-[#C9A45C] px-3 py-2 text-xs font-bold text-[#0A0A09]">Switch wallet network</button>}
+          {isSolana && (solanaWallet
+            ? <span className="font-mono text-xs text-[#C9A45C] truncate max-w-[220px]">Solana wallet: {solanaWallet}</span>
+            : <button type="button" onClick={() => { void ensureSolanaWallet().catch((e) => console.warn('[Solana] connect failed', e)); }} className="rounded-lg bg-[#C9A45C] px-3 py-2 text-xs font-bold text-[#0A0A09]">Connect Solana wallet</button>)}
+        </div>
 
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
@@ -883,12 +1413,14 @@ export default function AuctionDetailPage() {
           <div>
             <div className="mb-2 flex items-center justify-between">
               <span className="text-[#A8A397] text-[10px] uppercase font-bold tracking-widest">DIGITAL ASSET · {datasetMeta?.assetType || 'DATASET'}</span>
-              <Link
-                href={`/verify/${auction.id}`}
-                className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-[#C9A45C] hover:text-[#E6CC91] transition"
-              >
-                Proof of Auction ↗
-              </Link>
+              {targetChainId === bnbChain.id && (
+                <Link
+                  href={`/verify/${auction.id}`}
+                  className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-[#C9A45C] hover:text-[#E6CC91] transition"
+                >
+                  Proof of Auction ↗
+                </Link>
+              )}
             </div>
             <h1 className="text-4xl lg:text-5xl font-extrabold tracking-tight text-[#F5F2E8]">
               {auction.itemName}
@@ -958,7 +1490,7 @@ export default function AuctionDetailPage() {
             <div className="mt-8 grid grid-cols-3 rounded-2xl border border-white/10 bg-[#151512] overflow-hidden">
               <div className="p-5 border-r border-white/10">
                 <span className="block text-xs uppercase tracking-wider text-[#A8A397]">Starting At</span>
-                <span className="block mt-2 text-xl font-bold text-[#F5F2E8]">{formatEther(auction.startingPrice)} BNB</span>
+                <span className="block mt-2 text-xl font-bold text-[#F5F2E8]">{isSolana ? formatSolLamports(auction.startingPrice) : formatEther(auction.startingPrice)} {currencySymbol}</span>
               </div>
               <div className="p-5 border-r border-white/10">
                 <span className="block text-xs uppercase tracking-wider text-[#A8A397]">Bidders</span>
@@ -996,35 +1528,38 @@ export default function AuctionDetailPage() {
                         <div className="w-8 h-8 rounded-full bg-[#C9A45C] text-[#0A0A09] flex items-center justify-center font-bold text-sm flex-shrink-0">✓</div>
                         <div>
                           <p className="text-sm font-bold text-[#F5F2E8]">Bid locked</p>
-                          <p className="text-xs text-[#A8A397]">Committed on BNB Chain</p>
+                          <p className="text-xs text-[#A8A397]">Committed on {isSolana ? 'Solana Devnet' : targetChainId === baseSepoliaChain.id ? 'Base Sepolia' : 'BNB Chain'}</p>
                         </div>
                       </div>
                       <div className="p-4 rounded-xl bg-[#0A0A09] border border-white/10 space-y-2 text-xs">
                         <div className="flex justify-between">
                           <span className="text-[#A8A397]">Maximum bid saved for reveal</span>
-                          <span className="font-bold text-[#F5F2E8]">{committedMaxBid} BNB</span>
+                          <span className="font-bold text-[#F5F2E8]">{committedMaxBid} {currencySymbol}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-[#A8A397]">Public deposit</span>
-                          <span className="font-bold text-[#F5F2E8]">{committedDeposit} BNB</span>
+                          <span className="font-bold text-[#F5F2E8]">{committedDeposit} {currencySymbol}</span>
                         </div>
                         <div className="flex justify-between gap-4">
                           <span className="text-[#A8A397] flex-shrink-0">Tx hash</span>
                           <span className="font-mono text-[#C9A45C] truncate">{commitTxHash}</span>
                         </div>
                       </div>
-                      <a href={`${bnbChain.blockExplorers.default.url}/tx/${commitTxHash}`} target="_blank" rel="noreferrer"
+                      <a href={isSolana ? `https://explorer.solana.com/tx/${commitTxHash}?cluster=devnet` : `${explorerBase}/tx/${commitTxHash}`} target="_blank" rel="noreferrer"
                         className="block text-center text-xs font-semibold text-[#C9A45C] hover:underline">
-                        View transaction on BscScan ↗
+                        View transaction on {explorerName} ↗
                       </a>
                       <p className="text-center text-xs text-[#A8A397]">Secret saved locally. Return here to reveal after commit phase ends.</p>
+                      <button type="button" onClick={handleDownloadSecretBackup} className="block w-full text-center text-xs font-semibold text-[#C9A45C] hover:underline">
+                        Download bid secret backup (keep it private) ↓
+                      </button>
                     </div>
                   ) : (
                     <>
                       <p className="mt-2 text-sm leading-6 text-[#A8A397]">
-                        The commitment hash hides your bid until reveal. Your wallet address and deposit are public on-chain. A deposit equal to your maximum reveals that maximum; a higher deposit only gives others an upper bound. Any excess becomes claimable after you reveal.
+                        The commitment hash hides your bid until reveal. Your wallet address and deposit are public on-chain. A deposit equal to your maximum reveals that maximum; a higher deposit only gives others an upper bound. {isSolana ? 'Any excess is returned to your wallet automatically when you reveal.' : 'Any excess becomes claimable after you reveal.'}
                       </p>
-                      <label htmlFor="max-bid-input" className="mt-6 block text-xs font-semibold uppercase tracking-wider text-[#A8A397]">Maximum bid (BNB)</label>
+                      <label htmlFor="max-bid-input" className="mt-6 block text-xs font-semibold uppercase tracking-wider text-[#A8A397]">Maximum bid ({currencySymbol})</label>
                       <input
                         id="max-bid-input"
                         type="number" min="0.000000000000000001" step="0.000000000000000001"
@@ -1034,7 +1569,7 @@ export default function AuctionDetailPage() {
                         disabled={commitStatus === 'confirming'}
                         className="mt-2 w-full rounded-xl border border-white/10 bg-[#0A0A09] px-5 py-4 text-[#F5F2E8] outline-none focus:border-[#C9A45C]/60 disabled:opacity-50"
                       />
-                      <label htmlFor="public-deposit-input" className="mt-4 block text-xs font-semibold uppercase tracking-wider text-[#A8A397]">Public deposit (BNB)</label>
+                      <label htmlFor="public-deposit-input" className="mt-4 block text-xs font-semibold uppercase tracking-wider text-[#A8A397]">Public deposit ({currencySymbol})</label>
                       <input
                         id="public-deposit-input"
                         type="number" min="0.000000000000000001" step="0.000000000000000001"
@@ -1045,7 +1580,12 @@ export default function AuctionDetailPage() {
                         className="mt-2 w-full rounded-xl border border-white/10 bg-[#0A0A09] px-5 py-4 text-[#F5F2E8] outline-none focus:border-[#C9A45C]/60 disabled:opacity-50"
                       />
                       {commitError && (
-                        <div className="mt-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400">{commitError}</div>
+                        <div className="mt-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400">
+                          {commitError}
+                          {hasCommitted && (
+                            <button type="button" onClick={handleDownloadSecretBackup} className="mt-2 block font-semibold text-[#C9A45C] hover:underline">Download bid secret backup ↓</button>
+                          )}
+                        </div>
                       )}
                       <button
                         id="commit-bid-button"
@@ -1055,9 +1595,13 @@ export default function AuctionDetailPage() {
                       >
                         {commitStatus === 'confirming' ? 'CONFIRMING…' : 'COMMIT SEALED BID'}
                       </button>
-                      {!isConnected && <p className="mt-3 text-center text-xs text-[#A8A397]">Connect your wallet to place a bid.</p>}
-                      {isConnected && commitStatus === 'idle' && (
-                        <p className="mt-3 text-center text-xs text-[#A8A397]">Your deposit is locked on BNB Chain; excess over your revealed bid becomes claimable after reveal.</p>
+                      {!viewerConnected && <p className="mt-3 text-center text-xs text-[#A8A397]">Connect your {isSolana ? 'Solana ' : ''}wallet to place a bid.</p>}
+                      {viewerConnected && commitStatus === 'idle' && (
+                        <p className="mt-3 text-center text-xs text-[#A8A397]">
+                          {isSolana
+                            ? 'Your deposit is locked in a Solana Devnet program account; excess over your revealed bid is returned at reveal. Non-winning bidders reclaim their full deposit with no penalty.'
+                            : `Your deposit is locked on ${networkName}; excess over your revealed bid becomes claimable after reveal. Unrevealed bids lose 5% of their deposit.`}
+                        </p>
                       )}
                     </>
                   )}
@@ -1081,22 +1625,22 @@ export default function AuctionDetailPage() {
                       <div className="p-4 rounded-xl bg-[#0A0A09] border border-white/10 space-y-2 text-xs">
                         <div className="flex justify-between">
                           <span className="text-[#A8A397]">Revealed maximum</span>
-                          <span className="font-bold text-[#F5F2E8]">{storedSecret?.maxBid ?? '—'} BNB</span>
+                          <span className="font-bold text-[#F5F2E8]">{storedSecret?.maxBid ?? '—'} {currencySymbol}</span>
                         </div>
                         <div className="flex justify-between gap-4">
                           <span className="text-[#A8A397] flex-shrink-0">Tx hash</span>
                           <span className="font-mono text-[#C9A45C] truncate">{revealTxHash}</span>
                         </div>
                       </div>
-                      <a href={`${bnbChain.blockExplorers.default.url}/tx/${revealTxHash}`} target="_blank" rel="noreferrer"
+                      <a href={isSolana ? `https://explorer.solana.com/tx/${revealTxHash}?cluster=devnet` : `${explorerBase}/tx/${revealTxHash}`} target="_blank" rel="noreferrer"
                         className="block text-center text-xs font-semibold text-[#C9A45C] hover:underline">
-                        View transaction on BscScan ↗
+                        View transaction on {explorerName} ↗
                       </a>
                     </div>
                   ) : alreadyRevealed ? (
                     <div className="mt-4 p-4 rounded-xl bg-[#C9A45C]/5 border border-[#C9A45C]/20">
                       <p className="text-sm text-[#F5F2E8] font-semibold">You have already revealed your bid.</p>
-                      <p className="mt-1 text-xs text-[#A8A397]">Your maximum bid of {storedSecret?.maxBid} BNB was submitted on-chain.</p>
+                      <p className="mt-1 text-xs text-[#A8A397]">Your maximum bid of {storedSecret?.maxBid} {currencySymbol} was submitted on-chain.</p>
                     </div>
                   ) : hasCommitted ? (
                     <>
@@ -1106,9 +1650,10 @@ export default function AuctionDetailPage() {
                       <div className="mt-4 p-4 rounded-xl bg-[#0A0A09] border border-white/10 text-xs">
                         <div className="flex justify-between">
                           <span className="text-[#A8A397]">Your committed maximum</span>
-                          <span className="font-bold text-[#F5F2E8]">{storedSecret?.maxBid} BNB</span>
+                          <span className="font-bold text-[#F5F2E8]">{storedSecret?.maxBid ?? 'secret not found on this device'} {storedSecret ? currencySymbol : ''}</span>
                         </div>
                         <p className="mt-2 text-[#A8A397] opacity-70">The reveal will use your original committed values — you cannot change them.</p>
+                        <button type="button" onClick={handleDownloadSecretBackup} className="mt-2 font-semibold text-[#C9A45C] hover:underline">Download bid secret backup ↓</button>
                       </div>
                       {revealError && (
                         <div className="mt-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400">{revealError}</div>
@@ -1147,12 +1692,12 @@ export default function AuctionDetailPage() {
                       <button
                         id="settle-auction-button"
                         onClick={handleSettle}
-                        disabled={settleStatus === 'confirming' || !isConnected}
+                        disabled={settleStatus === 'confirming' || (!isSolana && !isConnected)}
                         className="mt-4 w-full rounded-xl bg-[#C9A45C] px-5 py-4 font-bold text-[#0A0A09] hover:bg-[#E6CC91] active:scale-[0.98] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {settleStatus === 'confirming' ? 'CONFIRMING…' : 'SETTLE AUCTION'}
                       </button>
-                      {!isConnected && <p className="mt-3 text-center text-xs text-[#A8A397]">Connect your wallet to settle.</p>}
+                      {!viewerConnected && <p className="mt-3 text-center text-xs text-[#A8A397]">Connect your {isSolana ? 'Solana ' : ''}wallet to settle.</p>}
                     </>
                   )}
 
@@ -1165,9 +1710,9 @@ export default function AuctionDetailPage() {
                           <p className="text-xs text-[#A8A397]">Winner and refunds determined on-chain.</p>
                         </div>
                       </div>
-                      <a href={`${bnbChain.blockExplorers.default.url}/tx/${settleTxHash}`} target="_blank" rel="noreferrer"
+                      <a href={isSolana ? `https://explorer.solana.com/tx/${settleTxHash}?cluster=devnet` : `${explorerBase}/tx/${settleTxHash}`} target="_blank" rel="noreferrer"
                         className="block text-center text-xs font-semibold text-[#C9A45C] hover:underline">
-                        View settlement transaction on BscScan ↗
+                        View settlement transaction on {explorerName} ↗
                       </a>
                     </div>
                   )}
@@ -1190,13 +1735,15 @@ export default function AuctionDetailPage() {
                               <p className="text-sm font-bold text-[#E6CC91] uppercase tracking-wider">You won this {datasetMeta?.assetType || 'digital asset'}</p>
                               <p className="text-xs text-[#A8A397]">
                                 {isCompletedOnChain 
-                                ? (datasetMeta?.deliveryMethod === 'nft-transfer' ? 'Payment is settled. Coordinate the NFT transfer with the seller using the token details above.' : 'Your access is unlocked. You can now download the full asset.') 
-                                  : 'Your access has been unlocked for inspection. Review the dataset before finalizing.'}
+                                ? (isNftAuction ? 'Payment is settled and the escrowed NFT was released to your wallet.' : 'Your access is unlocked. You can now download the full asset.') 
+                                  : isNftAuction
+                                    ? 'The NFT stays in VEILIO escrow during inspection. It is delivered to you when the inspection period ends and anyone finalizes settlement.'
+                                    : 'Your access has been unlocked for inspection. Review the dataset before finalizing.'}
                               </p>
                             </div>
                           </div>
                           
-                          {isCompletedOnChain && datasetMeta?.deliveryMethod !== 'nft-transfer' && (
+                          {isCompletedOnChain && !isNftAuction && (
                             <div className="mt-4 pt-4 border-t border-[#C9A45C]/20">
                               {unlockError && (
                                 <div className="mb-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400">{unlockError}</div>
@@ -1288,6 +1835,16 @@ export default function AuctionDetailPage() {
 
                               {isInspectionOnChain && (
                                 <div className="mt-6 space-y-4">
+                                  {isNftAuction ? (
+                                    <div className="rounded-2xl border border-blue-400/25 bg-blue-400/[0.04] p-5 space-y-3">
+                                      <h4 className="text-xs font-bold uppercase tracking-wider text-blue-200">{networkName} NFT escrow</h4>
+                                      <p className="text-xs leading-relaxed text-[#A8A397]">
+                                        The VeilNFTV4 contract releases the escrowed NFT only when settlement is finalized after the inspection period
+                                        {inspectionEndMs > 0 ? ` (ends ${new Date(inspectionEndMs).toLocaleString()})` : ''}. Until then you can request a refund if the asset does not match the listing.
+                                      </p>
+                                    </div>
+                                  ) : null}
+
                                   {/* Workspace Tabs */}
                                   <div className="flex border-b border-white/10 gap-2 pb-2">
                                     <button
@@ -1300,16 +1857,18 @@ export default function AuctionDetailPage() {
                                     >
                                       Verifikasi Delivery
                                     </button>
-                                    <button
-                                      onClick={() => setTransactionTab('chat')}
-                                      className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors ${
-                                        transactionTab === 'chat'
-                                          ? 'bg-[#C9A45C] text-[#0A0A09]'
-                                          : 'text-[#A8A397] hover:text-[#F5F2E8]'
-                                      }`}
-                                    >
-                                      Transaction Chat
-                                    </button>
+                                    {targetChainId === bnbChain.id && !isSolana && (
+                                      <button
+                                        onClick={() => setTransactionTab('chat')}
+                                        className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors ${
+                                          transactionTab === 'chat'
+                                            ? 'bg-[#C9A45C] text-[#0A0A09]'
+                                            : 'text-[#A8A397] hover:text-[#F5F2E8]'
+                                        }`}
+                                      >
+                                        Transaction Chat
+                                      </button>
+                                    )}
                                     <button
                                       onClick={() => {
                                         setTransactionTab('validator');
@@ -1341,19 +1900,19 @@ export default function AuctionDetailPage() {
                                           : null
                                       }
                                       deliveryStatus={datasetMeta ? 'delivery_submitted' : 'pending_delivery'}
-                                      isInspectionActive={isInspectionOnChain}
+                                      isInspectionActive={inspectionWindowOpen}
                                       onConfirmDelivery={handleAcceptDataset}
-                                      onOpenChat={() => setTransactionTab('chat')}
+                                      onOpenChat={() => setTransactionTab(targetChainId === bnbChain.id && !isSolana ? 'chat' : 'delivery')}
                                       onRequestRefund={() => setShowDisputeModal(true)}
                                     />
                                   )}
 
-                                  {transactionTab === 'chat' && (
+                                  {transactionTab === 'chat' && targetChainId === bnbChain.id && !isSolana && (
                                     <TransactionChat
                                       transactionId={auctionId}
                                       currentUserAddress={address || ''}
                                       isBuyer={isWinner}
-                                      isSeller={normalizeAddress(auction.seller) === normalizeAddress(address || '')}
+                                      isSeller={isSeller}
                                       onRequestValidation={fetchAiValidation}
                                     />
                                   )}
@@ -1368,9 +1927,10 @@ export default function AuctionDetailPage() {
 
                                   <DisputeModal
                                     auctionId={auctionId}
-                                    buyerAddress={address || ''}
+                                    networkId={networkId}
                                     isOpen={showDisputeModal}
                                     onClose={() => setShowDisputeModal(false)}
+                                    signAuth={signAuctionAuth}
                                     onSubmitOnchain={async (evidenceHash) => {
                                       await handleRequestRefund(evidenceHash);
                                     }}
@@ -1380,11 +1940,31 @@ export default function AuctionDetailPage() {
                             </div>
                           )}
 
+                          {isRefundRequestedOnChain && isSolana && (
+                            <div className="mt-4 pt-4 border-t border-[#C9A45C]/20">
+                              <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30">
+                                <h4 className="text-sm font-bold text-amber-300 uppercase tracking-wider">Refund requested</h4>
+                                <p className="text-xs text-[#A8A397] mt-1">
+                                  The auction reviewer decides on-chain. If no decision is made by {solanaRefundTimeoutMs ? new Date(solanaRefundTimeoutMs).toLocaleString() : 'the 7-day deadline'}, you can reclaim your full escrow yourself.
+                                </p>
+                                {canFinalizeRefundTimeout && (
+                                  <button
+                                    onClick={handleFinalizeRefundTimeout}
+                                    disabled={lifecycleStatus === 'confirming'}
+                                    className="mt-3 w-full rounded-xl border border-amber-400/40 px-5 py-3 text-xs font-bold uppercase tracking-wider text-amber-200 hover:bg-amber-400/10 disabled:opacity-50"
+                                  >
+                                    {lifecycleStatus === 'confirming' && lifecycleAction === 'refund timeout' ? 'CONFIRMING…' : 'Reclaim escrow (reviewer timeout)'}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
                           {isRefundedOnChain && (
                             <div className="mt-4 pt-4 border-t border-[#C9A45C]/20">
                               <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
                                 <h4 className="text-sm font-bold text-emerald-400 uppercase tracking-wider">Refund Approved</h4>
-                                <p className="text-xs text-[#A8A397] mt-1">Your refund request was approved by the reviewer. You can withdraw your refund below.</p>
+                                <p className="text-xs text-[#A8A397] mt-1">{isSolana ? 'Your refund was approved. The Solana program returned your full escrow to your wallet.' : 'Your refund request was approved by the reviewer. You can withdraw your refund below.'}</p>
                               </div>
                             </div>
                           )}
@@ -1412,21 +1992,91 @@ export default function AuctionDetailPage() {
                         </div>
                         <div className="flex justify-between">
                           <span className="text-[#A8A397]">Price paid</span>
-                          <span className="font-bold text-[#F5F2E8]">{formatEther(winningPrice)} BNB</span>
+                          <span className="font-bold text-[#F5F2E8]">{formatAmount(winningPrice)} {currencySymbol}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-[#A8A397]">Bidders revealed</span>
                           <span className="text-[#F5F2E8]">{Number(auction.revealedCount)} / {Number(auction.bidderCount)}</span>
                         </div>
+                        <div className="flex justify-between">
+                          <span className="text-[#A8A397]">Platform fee</span>
+                          <span className="text-[#F5F2E8]">{platformFeeBps === 0 ? '0% (seller receives the full winning bid)' : `${platformFeeBps / 100}%`}</span>
+                        </div>
+                        {(isInspectionOnChain || isRefundRequestedOnChain || isUnderReviewOnChain) && inspectionEndMs > 0 && (
+                          <div className="flex justify-between">
+                            <span className="text-[#A8A397]">Inspection ends</span>
+                            <span className="text-[#F5F2E8]">{new Date(inspectionEndMs).toLocaleString()}</span>
+                          </div>
+                        )}
                       </div>
+
+                      {/* FINALIZE AFTER INSPECTION — permissionless, required for NFT auctions */}
+                      {inspectionExpired && (
+                        <div className="rounded-xl border border-[#C9A45C]/30 bg-[#C9A45C]/5 p-4 space-y-3">
+                          <p className="text-xs font-semibold uppercase tracking-wider text-[#E6CC91]">Inspection period ended</p>
+                          <p className="text-xs leading-relaxed text-[#A8A397]">
+                            No refund was requested in time. Anyone can finalize settlement:{' '}
+                            {isSolana
+                              ? 'the program pays the full winning bid to the seller.'
+                              : `the contract credits the seller (minus the ${platformFeeBps / 100}% platform fee)${isNftAuction ? ' and delivers the escrowed NFT to the winner' : ''}.`}
+                          </p>
+                          <button
+                            id="finalize-settlement-button"
+                            onClick={handleFinalizeSettlement}
+                            disabled={lifecycleStatus === 'confirming' || (!isSolana && !isConnected)}
+                            className="w-full rounded-xl bg-[#C9A45C] px-5 py-3 text-sm font-bold text-[#0A0A09] hover:bg-[#E6CC91] active:scale-[0.98] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {lifecycleStatus === 'confirming' && lifecycleAction === 'finalize settlement' ? 'CONFIRMING…' : 'FINALIZE SETTLEMENT'}
+                          </button>
+                          {!viewerConnected && <p className="text-center text-xs text-[#A8A397]">Connect your {isSolana ? 'Solana ' : ''}wallet to finalize.</p>}
+                        </div>
+                      )}
+
                     </div>
                   ) : (
                     <div className="mt-4 p-4 rounded-xl bg-white/[0.03] border border-white/10">
                       <p className="text-sm text-[#A8A397]">
                         No valid bids were revealed above the starting price. The auction ended with no winner.
-                        Any deposited BNB has been refunded (minus a 5% anti-abort penalty for unrevealed bids).
+                        {' '}{noWinnerRefundText(networkId, currencySymbol)}
                       </p>
                     </div>
+                  )}
+
+                  {/* SOLANA: claim back a non-winning (or approved-refund) deposit */}
+                  {canClaimSolanaRefund && (
+                    <div className="mt-4 rounded-xl border border-white/10 bg-[#0A0A09] p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-[#A8A397] mb-3">{isWinner ? 'Approved Refund' : 'Your Refund (Non-winning Bid)'}</p>
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-xs text-[#A8A397]">Deposit held in your bid account</span>
+                        <span className="font-bold text-[#C9A45C]">{formatSolLamports(solanaCommitment!.deposit)} SOL</span>
+                      </div>
+                      <p className="mb-3 text-[11px] text-[#77746B]">Solana auctions charge no penalty: revealed and unrevealed bids get the full deposit plus the account rent back.</p>
+                      <button
+                        id="claim-solana-refund-button"
+                        onClick={handleClaimSolanaRefund}
+                        disabled={lifecycleStatus === 'confirming'}
+                        className="w-full rounded-xl border border-[#C9A45C]/40 text-[#C9A45C] px-5 py-3 text-sm font-bold hover:bg-[#C9A45C]/10 active:scale-[0.98] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {lifecycleStatus === 'confirming' && lifecycleAction === 'claim refund' ? 'CONFIRMING…' : 'CLAIM REFUND'}
+                      </button>
+                    </div>
+                  )}
+                  {isSolana && solanaWallet && solanaCommitmentLoaded && !solanaCommitment && hasCommitted && isSettledOrLater && !isWinner && (
+                    <p className="mt-4 text-xs text-[#A8A397]">Your Solana bid account is closed: the deposit has already been returned to your wallet.</p>
+                  )}
+
+                  {/* LIFECYCLE TX STATUS (accept / finalize / claim / timeout) */}
+                  {lifecycleStatus === 'error' && lifecycleError && (
+                    <div className="mt-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400">{lifecycleError}</div>
+                  )}
+                  {lifecycleStatus === 'success' && lifecycleTxHash && (
+                    <a
+                      href={isSolana ? `https://explorer.solana.com/tx/${lifecycleTxHash}?cluster=devnet` : `${explorerBase}/tx/${lifecycleTxHash}`}
+                      target="_blank" rel="noreferrer"
+                      className="mt-4 block text-center text-xs font-semibold text-[#C9A45C] hover:underline"
+                    >
+                      ✓ {lifecycleAction} confirmed · view on {explorerName} ↗
+                    </a>
                   )}
 
                   {/* ROLE-BASED SETTLEMENT PANEL */}
@@ -1442,20 +2092,20 @@ export default function AuctionDetailPage() {
                                 <span>✓</span>
                                 <span>Earnings withdrawn successfully</span>
                               </div>
-                              <a href={`${bnbChain.blockExplorers.default.url}/tx/${withdrawTxHash}`} target="_blank" rel="noreferrer"
+                              <a href={`${explorerBase}/tx/${withdrawTxHash}`} target="_blank" rel="noreferrer"
                                 className="block text-xs font-semibold text-emerald-400 hover:underline">
-                                View on BscScan ↗
+                                View on {explorerName} ↗
                               </a>
                             </div>
                           ) : (
                             <>
                               <div className="flex items-center justify-between mb-3">
                                 <span className="text-xs text-[#A8A397]">Your Earnings</span>
-                                <span className="font-bold text-[#F5F2E8]">{formatEther(pendingRefund!)} BNB</span>
+                                <span className="font-bold text-[#F5F2E8]">{formatEther(pendingRefund!)} {currencySymbol}</span>
                               </div>
                               <div className="flex items-center justify-between mb-4">
-                                <span className="text-xs text-[#A8A397]">Platform fee</span>
-                                <span className="text-xs text-[#A8A397]">{formatEther((winningPrice * BigInt(10)) / BigInt(100))} BNB</span>
+                                <span className="text-xs text-[#A8A397]">Platform fee ({platformFeeBps / 100}%)</span>
+                                <span className="text-xs text-[#A8A397]">{formatEther((winningPrice * BigInt(platformFeeBps)) / BigInt(10000))} {currencySymbol}</span>
                               </div>
                               {withdrawError && (
                                 <div className="mb-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400">{withdrawError}</div>
@@ -1485,16 +2135,16 @@ export default function AuctionDetailPage() {
                                 <span>✓</span>
                                 <span>Refund withdrawn successfully</span>
                               </div>
-                              <a href={`${bnbChain.blockExplorers.default.url}/tx/${withdrawTxHash}`} target="_blank" rel="noreferrer"
+                              <a href={`${explorerBase}/tx/${withdrawTxHash}`} target="_blank" rel="noreferrer"
                                 className="block text-xs font-semibold text-[#C9A45C] hover:underline">
-                                View on BscScan ↗
+                                View on {explorerName} ↗
                               </a>
                             </div>
                           ) : (
                             <>
                               <div className="flex items-center justify-between mb-3">
                                 <span className="text-xs text-[#A8A397]">Refund available</span>
-                                <span className="font-bold text-[#C9A45C]">{formatEther(pendingRefund!)} BNB</span>
+                                <span className="font-bold text-[#C9A45C]">{formatEther(pendingRefund!)} {currencySymbol}</span>
                               </div>
                               {withdrawError && (
                                 <div className="mb-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400">{withdrawError}</div>
@@ -1522,16 +2172,16 @@ export default function AuctionDetailPage() {
                                 <span>✓</span>
                                 <span>Refund withdrawn successfully</span>
                               </div>
-                              <a href={`${bnbChain.blockExplorers.default.url}/tx/${withdrawTxHash}`} target="_blank" rel="noreferrer"
+                              <a href={`${explorerBase}/tx/${withdrawTxHash}`} target="_blank" rel="noreferrer"
                                 className="block text-xs font-semibold text-[#C9A45C] hover:underline">
-                                View on BscScan ↗
+                                View on {explorerName} ↗
                               </a>
                             </div>
                           ) : (
                             <>
                               <div className="flex items-center justify-between mb-3">
                                 <span className="text-xs text-[#A8A397]">Refund available</span>
-                                <span className="font-bold text-[#C9A45C]">{formatEther(pendingRefund!)} BNB</span>
+                                <span className="font-bold text-[#C9A45C]">{formatEther(pendingRefund!)} {currencySymbol}</span>
                               </div>
                               {withdrawError && (
                                 <div className="mb-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400">{withdrawError}</div>
@@ -1576,7 +2226,7 @@ export default function AuctionDetailPage() {
                 </div>
                 <div className="flex justify-between gap-6">
                   <span className="text-[#A8A397]">Contract</span>
-                  <span className="font-mono text-[#F5F2E8] truncate max-w-[280px]">{VEIL_V3_CONTRACT_ADDRESS}</span>
+                  <span className="font-mono text-[#F5F2E8] truncate max-w-[280px]">{auctionContract.address}</span>
                 </div>
               </div>
             </div>
@@ -1587,3 +2237,4 @@ export default function AuctionDetailPage() {
     </div>
   );
 }
+

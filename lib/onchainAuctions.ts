@@ -1,7 +1,7 @@
 import type { usePublicClient } from 'wagmi';
 import { formatEther } from 'viem';
 import type { AuctionItem } from './mockAuctions';
-import { VEIL_V3_ABI, VEIL_V3_CONTRACT_ADDRESS } from './contract';
+import { getAuctionContractConfig } from './contract';
 import { resolveIpfsUri } from './ipfs';
 import { computeParticipantReputation } from './reputation';
 
@@ -57,11 +57,13 @@ interface AuctionMetadata {
 
 export async function fetchOnchainAuctions(
   publicClient: NonNullable<ReturnType<typeof usePublicClient>>,
-  input: { cursor?: string | bigint | number; limit?: number } = {},
+  input: { cursor?: string | bigint | number; limit?: number; chainId?: number } = {},
 ): Promise<{ auctions: AuctionItem[]; nextCursor: string | null; total: string }> {
+  const targetChainId = input.chainId ?? publicClient.chain?.id ?? 97;
+  const contract = getAuctionContractConfig(targetChainId);
   const count = await publicClient.readContract({
-    address: VEIL_V3_CONTRACT_ADDRESS,
-    abi: VEIL_V3_ABI,
+    address: contract.address,
+    abi: contract.abi,
     functionName: 'auctionCount',
   }) as bigint;
 
@@ -74,8 +76,8 @@ export async function fetchOnchainAuctions(
   const results = await Promise.all(ids.map(async (auctionId) => {
     try {
       const raw = await publicClient.readContract({
-        address: VEIL_V3_CONTRACT_ADDRESS,
-        abi: VEIL_V3_ABI,
+        address: contract.address,
+        abi: contract.abi,
         functionName: 'auctions',
         args: [auctionId],
       }) as unknown as AuctionData;
@@ -172,6 +174,8 @@ export async function fetchOnchainAuctions(
         bidderCount: Number(bidderCount), commitEndTime: commitEndMs,
         revealEndTime: revealEndMs, status, seller, assetType,
         metadata: parsedMetadata,
+        contractAddress: contract.address,
+        networkId: targetChainId === 84532 ? 'base:84532' : 'bnb:97',
         sellerReputation: (() => {
           const rep = computeParticipantReputation(seller, { role: 'seller' });
           return {

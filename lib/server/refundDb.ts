@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { DEFAULT_AUCTION_NETWORK, scopedAuctionKey, type AuctionNetworkId } from '../auctionNetwork';
 
 export interface RefundEvidence {
   auctionId: string;
@@ -10,6 +11,8 @@ export interface RefundEvidence {
   reason: string;
   evidenceHash: string; // Used to link to on-chain evidenceHash
   timestamp: number;
+  /** Missing on records written before multi-chain support: those are BNB (`bnb:97`). */
+  networkId?: AuctionNetworkId;
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -37,18 +40,25 @@ function writeDb(data: Record<string, RefundEvidence>) {
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
 }
 
+function withNetwork(evidence: RefundEvidence): RefundEvidence & { networkId: AuctionNetworkId } {
+  return { ...evidence, networkId: evidence.networkId || DEFAULT_AUCTION_NETWORK };
+}
+
+/** Records are keyed by `networkId:auctionId` (bare auctionId for BNB, matching legacy records). */
 export function saveRefundEvidence(evidence: RefundEvidence) {
   const db = readDb();
-  db[evidence.auctionId] = evidence;
+  const networkId = evidence.networkId || DEFAULT_AUCTION_NETWORK;
+  db[scopedAuctionKey(networkId, evidence.auctionId)] = { ...evidence, networkId };
   writeDb(db);
 }
 
-export function getRefundEvidence(auctionId: string): RefundEvidence | null {
+export function getRefundEvidence(auctionId: string, networkId: AuctionNetworkId = DEFAULT_AUCTION_NETWORK): RefundEvidence | null {
   const db = readDb();
-  return db[auctionId] || null;
+  const record = db[scopedAuctionKey(networkId, auctionId)];
+  return record && (record.networkId || DEFAULT_AUCTION_NETWORK) === networkId ? withNetwork(record) : null;
 }
 
-export function getAllRefundEvidence(): RefundEvidence[] {
+export function getAllRefundEvidence(): Array<RefundEvidence & { networkId: AuctionNetworkId }> {
   const db = readDb();
-  return Object.values(db);
+  return Object.values(db).map(withNetwork);
 }

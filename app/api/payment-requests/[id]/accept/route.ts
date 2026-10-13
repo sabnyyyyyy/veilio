@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   getPaymentRequest,
   createOrderFromPaymentRequest,
+  sameWalletAddress,
 } from '@/lib/server/servicesDb';
 import { isAddress } from 'viem';
-import { verifyServiceAuth } from '@/lib/server/serviceAuth';
+import { verifyServiceAuth, isSolanaAddress } from '@/lib/server/serviceAuth';
+import { servicesErrorStatus } from '@/lib/server/serviceOrderNetwork';
 
 export async function POST(
   req: NextRequest,
@@ -21,16 +23,23 @@ export async function POST(
       return NextResponse.json({ error: `Payment request is already ${pr.status}` }, { status: 400 });
     }
 
+    if (pr.expiresAt && Date.now() > pr.expiresAt) {
+      return NextResponse.json({ error: 'Payment request has expired; ask the seller to issue a new one' }, { status: 410 });
+    }
+
     const body = await req.json();
     const { buyerAddress, auth } = body;
 
     const caller = buyerAddress || auth?.address;
-    if (!caller || !isAddress(caller)) {
-      return NextResponse.json({ error: 'Valid buyer EVM address is required' }, { status: 400 });
+    const isEvmCaller = caller && isAddress(caller);
+    const isSolanaCaller = caller && !isEvmCaller && isSolanaAddress(caller);
+
+    if (!caller || (!isEvmCaller && !isSolanaCaller)) {
+      return NextResponse.json({ error: 'Valid buyer wallet address is required' }, { status: 400 });
     }
 
     // Role check: Only designated buyer can accept
-    if (pr.buyerId.toLowerCase() !== caller.toLowerCase()) {
+    if (!sameWalletAddress(pr.buyerId, caller)) {
       return NextResponse.json(
         { error: 'Unauthorized: only designated buyer can accept this payment request' },
         { status: 403 }
@@ -70,6 +79,6 @@ export async function POST(
     return NextResponse.json({ success: true, order });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: servicesErrorStatus(err) });
   }
 }

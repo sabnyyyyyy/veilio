@@ -1,15 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getOrderById,
-  updateOrderStatus,
-  addServiceMessage,
-  updatePaymentRequestStatus,
+  transitionOrderStatus,
 } from '@/lib/server/servicesDb';
 import { isAddress, parseEventLogs, parseEther } from 'viem';
-import { agentPublicClient } from '@/lib/agent-sdk/server';
-import { VEIL_SERVICE_ESCROW_ABI, VEIL_SERVICE_ESCROW_CONTRACT_ADDRESS } from '@/lib/serviceContract';
+import { getAgentPublicClientForChain } from '@/lib/agent-sdk/server';
+import {
+  VEIL_SERVICE_ESCROW_ABI,
+  getServiceEscrowAddress,
+  normalizeChainId,
+} from '@/lib/serviceContract';
 import { formatServiceOrderId } from '@/lib/agent-sdk';
 import { verifyServiceAuth } from '@/lib/server/serviceAuth';
+import { verifySolanaEscrowTransaction } from '@/lib/server/solanaServiceVerification';
+import {
+  getSolanaServiceFeeRecipient,
+  getSolanaServiceReviewer,
+  parseSolToLamports,
+} from '@/lib/cross-chain/solanaServiceEscrow';
+import {
+  networkDisplayName,
+  resolveOrderNetworkForRequest,
+  servicesErrorStatus,
+} from '@/lib/server/serviceOrderNetwork';
 
 export async function POST(
   req: NextRequest,
@@ -31,14 +44,14 @@ export async function POST(
     }
 
     const body = await req.json();
-    const { txHash, onChainOrderId, buyerAddress, auth } = body;
+    const { txHash, onChainOrderId, buyerAddress, auth, network: reqNetwork } = body;
 
     const caller = buyerAddress || auth?.address;
-    if (!caller || !isAddress(caller)) {
+    if (!caller) {
       return NextResponse.json({ error: 'Valid buyerAddress is required' }, { status: 400 });
     }
 
-    // 1. Cryptographic wallet authentication (AUDIT-001)
+    // 1. Cryptographic wallet authentication (AUDIT-001) - multi-chain aware
     const authResult = await verifyServiceAuth({
       action: 'verify-deposit',
       orderId: id,
@@ -58,6 +71,78 @@ export async function POST(
       );
     }
 
+    // Settlement network comes from the stored order; a mismatching body value is rejected.
+    const resolved = resolveOrderNetworkForRequest(order, reqNetwork);
+    if (!resolved.ok) {
+      return NextResponse.json({ error: resolved.error }, { status: resolved.status });
+    }
+    const minDeadlineSec = Math.floor(order.deadline / 1000);
+
+    if (resolved.network === 'solana:devnet') {
+      // Solana Verification Flow (fail-closed: tx + escrow account must match the order)
+      if (!txHash || typeof txHash !== 'string') {
+        return NextResponse.json(
+          { error: 'Valid Solana transaction signature is required' },
+          { status: 400 }
+        );
+      }
+
+      let minAmountLamports: bigint;
+      try {
+        minAmountLamports = parseSolToLamports(order.priceSnapshot);
+      } catch {
+        return NextResponse.json({ error: `Order price is not a valid SOL amount: ${order.priceSnapshot}` }, { status: 500 });
+      }
+
+      const verification = await verifySolanaEscrowTransaction({
+        signature: txHash,
+        expectation: {
+          orderId: order.escrowReference || order.id,
+          buyer: order.buyerId,
+          seller: order.sellerId,
+          // Seller may already have called submit_delivery by the time the buyer verifies.
+          allowedStatuses: ['Funded', 'Delivered'],
+          minAmountLamports,
+          // Reviewer / fee recipient must be the on-chain EscrowConfig's once it exists (upgraded
+          // program); before the upgrade, the env platform reviewer / fee recipient. Fail-closed
+          // (503) when neither is available.
+          platform: {
+            envReviewer: getSolanaServiceReviewer(),
+            envFeeRecipient: getSolanaServiceFeeRecipient(),
+          },
+          minDeadlineSec,
+          requiredSigner: order.buyerId,
+          instruction: 'deposit',
+        },
+      });
+
+      if (!verification.ok) {
+        return NextResponse.json({ error: verification.error }, { status: verification.status });
+      }
+
+      const updated = transitionOrderStatus({
+        orderId: id,
+        from: ['AwaitingPayment'],
+        to: 'InProgress',
+        paymentStatus: 'Funded',
+        escrowReference: verification.escrow.orderIdHex,
+        txHash,
+        paymentRequestStatus: 'funded',
+        message: {
+          senderId: order.buyerId,
+          senderType: 'human',
+          content: `[ESCROW FUNDED ON SOLANA DEVNET] Buyer deposited ${order.priceSnapshot} ${order.currency} into on-chain escrow. Sig: ${txHash.slice(0, 10)}...${txHash.slice(-8)}. Provider may begin work!`,
+        },
+      });
+
+      return NextResponse.json({ success: true, order: updated });
+    }
+
+    // EVM Verification Flow (BNB Chain Testnet or Base Sepolia)
+    const targetChainId = normalizeChainId(resolved.network);
+    const client = getAgentPublicClientForChain(targetChainId);
+    const targetContractAddr = getServiceEscrowAddress(targetChainId);
+
     // 2. Format check on transaction hash
     if (!txHash || typeof txHash !== 'string' || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
       return NextResponse.json(
@@ -66,10 +151,9 @@ export async function POST(
       );
     }
 
-    const targetContractAddr = VEIL_SERVICE_ESCROW_CONTRACT_ADDRESS || process.env.NEXT_PUBLIC_SERVICE_ESCROW_CONTRACT_ADDRESS;
     if (!targetContractAddr || !isAddress(targetContractAddr)) {
       return NextResponse.json(
-        { error: 'Server configuration error: VEIL_SERVICE_ESCROW_CONTRACT_ADDRESS is not configured' },
+        { error: `Server configuration error: VeilServiceEscrow address is not configured for chain ID ${targetChainId}` },
         { status: 500 }
       );
     }
@@ -77,10 +161,10 @@ export async function POST(
     // 3. Fail-Closed On-Chain Receipt Validation (AUDIT-002)
     let receipt;
     try {
-      receipt = await agentPublicClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
+      receipt = await client.getTransactionReceipt({ hash: txHash as `0x${string}` });
     } catch (rpcErr: any) {
       return NextResponse.json(
-        { error: `Deposit transaction not confirmed on-chain: ${rpcErr?.shortMessage || rpcErr?.message || 'Transaction receipt not found'}` },
+        { error: `Deposit transaction not confirmed on-chain (${targetChainId === 84532 ? 'Base Sepolia' : 'BNB Testnet'}): ${rpcErr?.shortMessage || rpcErr?.message || 'Transaction receipt not found'}` },
         { status: 400 }
       );
     }
@@ -123,7 +207,15 @@ export async function POST(
     }
 
     // Match expected order identifier
-    const expectedOrderIdHex = formatServiceOrderId(onChainOrderId || order.escrowReference || order.id).toLowerCase();
+    // The on-chain order id is derived from the stored order only; a client-supplied
+    // onChainOrderId must agree with it (prevents crediting one deposit to another order).
+    const expectedOrderIdHex = formatServiceOrderId(order.escrowReference || order.id).toLowerCase();
+    if (onChainOrderId && String(onChainOrderId).toLowerCase() !== expectedOrderIdHex) {
+      return NextResponse.json(
+        { error: `onChainOrderId does not match this order (${expectedOrderIdHex})` },
+        { status: 400 }
+      );
+    }
     const matchingLog = fundedLogs.find((log: any) => {
       const logOrderId = String(log.args?.orderId || '').toLowerCase();
       return logOrderId === expectedOrderIdHex;
@@ -140,6 +232,7 @@ export async function POST(
     const logBuyer = String((matchingLog as any).args?.buyer || '').toLowerCase();
     const logSeller = String((matchingLog as any).args?.seller || '').toLowerCase();
     const logAmount = BigInt((matchingLog as any).args?.amount || 0n);
+    const logDeadline = Number((matchingLog as any).args?.deadline ?? 0);
     const expectedMinAmount = parseEther(order.priceSnapshot);
 
     if (logBuyer !== order.buyerId.toLowerCase()) {
@@ -163,35 +256,36 @@ export async function POST(
       );
     }
 
-    // Re-check order status immediately prior to persistence to guard against concurrent modifications (SEC-NEW-01)
-    const freshOrder = getOrderById(id);
-    if (!freshOrder || freshOrder.status !== 'AwaitingPayment') {
+    // A buyer-chosen on-chain deadline shorter than the agreed one would let the buyer
+    // claim a timeout refund early, so it is rejected.
+    if (!Number.isFinite(logDeadline) || logDeadline < minDeadlineSec) {
       return NextResponse.json(
-        { error: `State conflict: order status changed to '${freshOrder?.status || 'Unknown'}' during verification` },
-        { status: 409 }
+        { error: `OrderFunded deadline (${logDeadline}) is earlier than the agreed order deadline (${minDeadlineSec})` },
+        { status: 400 }
       );
     }
 
-    // 6. Update order status to Funded & InProgress in database
-    const escrowRef = onChainOrderId || (matchingLog as any).args?.orderId || txHash;
-    const updated = updateOrderStatus(id, 'InProgress', 'Funded', escrowRef, txHash);
-
-    // Sync associated payment request status if present
-    if (order.paymentRequestId) {
-      updatePaymentRequestStatus(order.paymentRequestId, 'funded');
-    }
-
-    // Notify conversation
-    addServiceMessage({
-      conversationId: order.conversationId,
-      senderId: caller,
-      senderType: 'human',
-      content: `[ESCROW FUNDED] Buyer deposited ${order.priceSnapshot} ${order.currency} into on-chain escrow. Tx: ${txHash.slice(0, 10)}...${txHash.slice(-8)}. Seller may begin work!`,
+    // 6. Atomically move AwaitingPayment -> InProgress/Funded (409 if it changed meanwhile)
+    const escrowRef = (matchingLog as any).args?.orderId || expectedOrderIdHex;
+    const networkName = networkDisplayName(resolved.network);
+    const updated = transitionOrderStatus({
+      orderId: id,
+      from: ['AwaitingPayment'],
+      to: 'InProgress',
+      paymentStatus: 'Funded',
+      escrowReference: escrowRef,
+      txHash,
+      paymentRequestStatus: 'funded',
+      message: {
+        senderId: order.buyerId,
+        senderType: 'human',
+        content: `[ESCROW FUNDED ON ${networkName.toUpperCase()}] Buyer deposited ${order.priceSnapshot} ${order.currency} into on-chain escrow. Tx: ${txHash.slice(0, 10)}...${txHash.slice(-8)}. Seller may begin work!`,
+      },
     });
 
     return NextResponse.json({ success: true, order: updated });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: servicesErrorStatus(err) });
   }
 }

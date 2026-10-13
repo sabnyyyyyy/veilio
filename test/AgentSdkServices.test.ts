@@ -67,6 +67,36 @@ describe('VEILIO Agent SDK - Services Extension & Backward Compatibility', () =>
       expect(agent.claimAsset).to.be.a('function');
       expect(agent.getLicense).to.be.a('function');
     });
+
+    it('exposes the full auction lifecycle and targets the chosen chain (S3/S4)', async () => {
+      const agent = createVeilioAgent({
+        publicClient: { readContract: async () => 0n } as any,
+        account: buyer.address as `0x${string}`,
+        chainId: 84532,
+      });
+      expect(agent.chainId).to.equal(84532);
+      expect(agent.services?.chainId).to.equal(84532);
+      expect(agent.prepareBid(1n, '0.01').chainId).to.equal(84532);
+      for (const fn of ['settleAuction', 'finalizeSettlement', 'requestRefund', 'withdrawRefund', 'getPendingRefund', 'isNftAuction']) {
+        expect((agent as any)[fn]).to.be.a('function');
+      }
+      expect(() =>
+        createVeilioAgent({ publicClient: {} as any, account: buyer.address as `0x${string}`, chainId: 1 })
+      ).to.throw('Invalid chain ID 1');
+
+      const sent: unknown[] = [];
+      const bnbAgent = createVeilioAgent({
+        publicClient: { readContract: async () => 0n } as any,
+        walletClient: {
+          account: buyer.address,
+          chain: { id: 84532 },
+          writeContract: async (req: unknown) => { sent.push(req); return '0x'; },
+        } as any,
+        account: buyer.address as `0x${string}`,
+      });
+      await expect(bnbAgent.settleAuction(1)).to.be.rejectedWith('does not match required BNB Chain testnet (97)');
+      expect(sent).to.have.length(0);
+    });
   });
 
   describe('Configuration & Security Guardrails', () => {

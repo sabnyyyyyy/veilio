@@ -2,30 +2,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   getOrderById,
   createServiceDispute,
-  getDisputeByOrderId,
+  sameWalletAddress,
+  FUNDED_ACTIVE_ORDER_STATUSES,
 } from '@/lib/server/servicesDb';
 import { isAddress, parseEventLogs } from 'viem';
-import { agentPublicClient } from '@/lib/agent-sdk/server';
-import { VEIL_SERVICE_ESCROW_ABI, VEIL_SERVICE_ESCROW_CONTRACT_ADDRESS } from '@/lib/serviceContract';
+import { getAgentPublicClientForChain } from '@/lib/agent-sdk/server';
+import { VEIL_SERVICE_ESCROW_ABI, getServiceEscrowAddress } from '@/lib/serviceContract';
 import { formatServiceOrderId } from '@/lib/agent-sdk';
-import { verifyServiceAuth } from '@/lib/server/serviceAuth';
-
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id: orderId } = await params;
-    const dispute = getDisputeByOrderId(orderId);
-    if (!dispute) {
-      return NextResponse.json({ success: true, dispute: null });
-    }
-    return NextResponse.json({ success: true, dispute });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Internal server error';
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-}
+import { verifyServiceAuth, isSolanaAddress } from '@/lib/server/serviceAuth';
+import { verifySolanaEscrowTransaction } from '@/lib/server/solanaServiceVerification';
+import {
+  networkDisplayName,
+  resolveOrderNetworkForRequest,
+  servicesErrorStatus,
+} from '@/lib/server/serviceOrderNetwork';
 
 export async function POST(
   req: NextRequest,
@@ -47,10 +37,11 @@ export async function POST(
       evidenceReferences,
       txHash,
       auth,
+      network: reqNetwork,
     } = body;
 
     const caller = initiatorAddress || auth?.address;
-    if (!caller || !isAddress(caller) || !reason) {
+    if (!caller || typeof caller !== 'string' || (!isAddress(caller) && !isSolanaAddress(caller)) || !reason || typeof reason !== 'string') {
       return NextResponse.json(
         { error: 'Missing required fields: initiatorAddress and reason are required' },
         { status: 400 }
@@ -58,9 +49,8 @@ export async function POST(
     }
 
     // Role check: Only buyer or seller can dispute
-    const callerLower = caller.toLowerCase();
-    const isBuyer = order.buyerId.toLowerCase() === callerLower;
-    const isSeller = order.sellerId.toLowerCase() === callerLower;
+    const isBuyer = sameWalletAddress(order.buyerId, caller);
+    const isSeller = sameWalletAddress(order.sellerId, caller);
     if (!isBuyer && !isSeller) {
       return NextResponse.json(
         { error: 'Unauthorized: only buyer or seller can dispute this order' },
@@ -88,19 +78,65 @@ export async function POST(
       );
     }
 
-    // Fail-Closed Validation for On-Chain Dispute Tx (if provided)
-    if (txHash) {
-      if (typeof txHash !== 'string' || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
+    // Escrow funds are locked on-chain for every disputable order, so the on-chain
+    // dispute transaction is mandatory: otherwise the reviewer's resolveDispute would revert
+    // (escrow not in Disputed state) and the order would be stuck off-chain.
+    if (!FUNDED_ACTIVE_ORDER_STATUSES.includes(order.status) || order.paymentStatus !== 'Funded') {
+      return NextResponse.json(
+        { error: `Order cannot be disputed in its current status: ${order.status}` },
+        { status: 409 }
+      );
+    }
+
+    const resolved = resolveOrderNetworkForRequest(order, reqNetwork);
+    if (!resolved.ok) {
+      return NextResponse.json({ error: resolved.error }, { status: resolved.status });
+    }
+
+    if (!txHash || typeof txHash !== 'string') {
+      return NextResponse.json(
+        { error: `On-chain dispute transaction (txHash) on ${networkDisplayName(resolved.network)} is required` },
+        { status: 400 }
+      );
+    }
+
+    const initiator = isBuyer ? order.buyerId : order.sellerId;
+
+    if (resolved.network === 'solana:devnet') {
+      const verification = await verifySolanaEscrowTransaction({
+        signature: txHash,
+        expectation: {
+          orderId: order.escrowReference || order.id,
+          buyer: order.buyerId,
+          seller: order.sellerId,
+          allowedStatuses: ['Disputed'],
+          requiredSigner: initiator,
+          instruction: 'dispute',
+        },
+      });
+      if (!verification.ok) {
+        return NextResponse.json({ error: verification.error }, { status: verification.status });
+      }
+    } else {
+      if (!/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
         return NextResponse.json(
           { error: 'Invalid transaction hash format for on-chain dispute' },
           { status: 400 }
         );
       }
 
-      const targetContractAddr = VEIL_SERVICE_ESCROW_CONTRACT_ADDRESS || process.env.NEXT_PUBLIC_SERVICE_ESCROW_CONTRACT_ADDRESS;
+      const chainId = resolved.chainId as number;
+      const targetContractAddr = getServiceEscrowAddress(chainId);
+      if (!targetContractAddr || !isAddress(targetContractAddr)) {
+        return NextResponse.json(
+          { error: `Server configuration error: VeilServiceEscrow address is not configured for chain ID ${chainId}` },
+          { status: 500 }
+        );
+      }
+
       let receipt;
       try {
-        receipt = await agentPublicClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
+        receipt = await getAgentPublicClientForChain(chainId).getTransactionReceipt({ hash: txHash as `0x${string}` });
       } catch (rpcErr: any) {
         return NextResponse.json(
           { error: `Dispute transaction not confirmed on-chain: ${rpcErr?.shortMessage || rpcErr?.message || 'Transaction receipt not found'}` },
@@ -115,37 +151,35 @@ export async function POST(
         );
       }
 
-      if (targetContractAddr && receipt.to && receipt.to.toLowerCase() !== targetContractAddr.toLowerCase()) {
+      if (!receipt.to || receipt.to.toLowerCase() !== targetContractAddr.toLowerCase()) {
         return NextResponse.json(
-          { error: `Transaction recipient does not match VeilServiceEscrow contract` },
+          { error: `Transaction recipient does not match VeilServiceEscrow contract (${targetContractAddr})` },
           { status: 400 }
         );
       }
 
-      // Validate OrderDisputed event
+      // Validate OrderDisputed event (required, must match order and initiator)
+      let disputedLogs;
       try {
-        const disputedLogs = parseEventLogs({
+        disputedLogs = parseEventLogs({
           abi: VEIL_SERVICE_ESCROW_ABI,
           logs: receipt.logs,
           eventName: 'OrderDisputed',
         });
-
-        if (disputedLogs && disputedLogs.length > 0) {
-          const expectedOrderIdHex = formatServiceOrderId(order.escrowReference || order.id).toLowerCase();
-          const matchingLog = disputedLogs.find((log: any) => {
-            const logOrderId = String(log.args?.orderId || '').toLowerCase();
-            return logOrderId === expectedOrderIdHex;
-          });
-          if (!matchingLog) {
-            return NextResponse.json(
-              { error: `OrderDisputed event does not match order identifier (${expectedOrderIdHex})` },
-              { status: 400 }
-            );
-          }
-        }
       } catch (parseErr: any) {
         return NextResponse.json(
           { error: `Failed to parse OrderDisputed event logs: ${parseErr.message}` },
+          { status: 400 }
+        );
+      }
+      const expectedOrderIdHex = formatServiceOrderId(order.escrowReference || order.id).toLowerCase();
+      const matchingLog = (disputedLogs || []).find((log: any) =>
+        String(log.args?.orderId || '').toLowerCase() === expectedOrderIdHex &&
+        String(log.args?.openedBy || '').toLowerCase() === initiator.toLowerCase()
+      );
+      if (!matchingLog) {
+        return NextResponse.json(
+          { error: `Receipt has no OrderDisputed event for order ${expectedOrderIdHex} opened by ${initiator}` },
           { status: 400 }
         );
       }
@@ -154,8 +188,8 @@ export async function POST(
     // Create dispute
     const dispute = createServiceDispute({
       orderId,
-      initiatorAddress: caller,
-      reason: reason.trim(),
+      initiatorAddress: initiator,
+      reason: reason.trim().slice(0, 2000),
       evidenceTitle,
       evidenceDescription,
       evidenceReferences,
@@ -169,6 +203,6 @@ export async function POST(
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error';
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json({ error: message }, { status: servicesErrorStatus(err, 400) });
   }
 }

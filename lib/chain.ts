@@ -15,3 +15,21 @@ export const bnbChain = defineChain({
     default: { name: 'BscScan Testnet', url: 'https://testnet.bscscan.com' },
   },
 });
+
+/** Base Sepolia hosts the deployed auction contract. */
+export const baseSepoliaChain = defineChain({
+  id: 84532,
+  name: 'Base Sepolia',
+  nativeCurrency: {
+    name: 'Base Sepolia ETH',
+    symbol: 'ETH',
+    decimals: 18,
+  },
+  rpcUrls: {
+    default: { http: [process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC || 'https://sepolia.base.org'] },
+  },
+  blockExplorers: {
+    default: { name: 'BaseScan Sepolia', url: 'https://sepolia.basescan.org' },
+  },
+  testnet: true,
+});

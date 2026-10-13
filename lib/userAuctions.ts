@@ -1,6 +1,6 @@
 import type { usePublicClient } from 'wagmi';
 import { formatEther } from 'viem';
-import { VEIL_V3_ABI, VEIL_V3_CONTRACT_ADDRESS } from './contract';
+import { getAuctionContractConfig } from './contract';
 import { resolveIpfsUri } from './ipfs';
 
 type AuctionData = readonly [
@@ -43,18 +43,24 @@ export interface UserAuctionItem {
   status: 'Bidding' | 'Revealing' | 'Settled';
   seller: string;
   assetType?: string;
+  contractAddress?: string;
+  networkId?: 'bnb:97' | 'base:84532';
 }
 
 export async function fetchUserAuctions(
   publicClient: NonNullable<ReturnType<typeof usePublicClient>>,
-  userAddress: `0x${string}`
+  userAddress: `0x${string}`,
+  options: { chainId?: number } = {}
 ): Promise<UserAuctionItem[]> {
-  // The public BNB RPC limits historical eth_getLogs ranges. Read the auction
+  const targetChainId = options.chainId ?? publicClient.chain?.id ?? 97;
+  const contract = getAuctionContractConfig(targetChainId);
+
+  // The public RPC limits historical eth_getLogs ranges. Read the auction
   // index in small batches instead of requesting every AuctionCreated log from
   // genesis. This also avoids making user history depend on RPC log retention.
   const count = await publicClient.readContract({
-    address: VEIL_V3_CONTRACT_ADDRESS,
-    abi: VEIL_V3_ABI,
+    address: contract.address,
+    abi: contract.abi,
     functionName: 'auctionCount',
   });
   const auctionIds = new Set<string>();
@@ -63,8 +69,8 @@ export async function fetchUserAuctions(
     const end = Math.max(1, start - batchSize + 1);
     const ids = Array.from({ length: start - end + 1 }, (_, index) => start - index);
     const auctionsInBatch = await Promise.all(ids.map((id) => publicClient.readContract({
-      address: VEIL_V3_CONTRACT_ADDRESS,
-      abi: VEIL_V3_ABI,
+      address: contract.address,
+      abi: contract.abi,
       functionName: 'auctions',
       args: [BigInt(id)],
     }) as Promise<unknown>));
@@ -86,8 +92,8 @@ export async function fetchUserAuctions(
   for (const idStr of auctionIds) {
     try {
       const raw = await publicClient.readContract({
-        address: VEIL_V3_CONTRACT_ADDRESS,
-        abi: VEIL_V3_ABI,
+        address: contract.address,
+        abi: contract.abi,
         functionName: 'auctions',
         args: [BigInt(idStr)],
       }) as unknown as AuctionData;
@@ -170,6 +176,8 @@ export async function fetchUserAuctions(
         status,
         seller,
         assetType,
+        contractAddress: contract.address,
+        networkId: targetChainId === 84532 ? 'base:84532' : 'bnb:97',
       });
     } catch (error) {
       console.error(`Failed to load auction ${idStr}:`, error);

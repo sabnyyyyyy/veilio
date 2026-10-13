@@ -1,5 +1,5 @@
-import { createPublicClient, http, parseAbi, formatEther, type Hex } from 'viem';
-import { bnbChain } from '../chain';
+import { createPublicClient, http, parseAbi, formatEther, type Hex, type Address } from 'viem';
+import { bnbChain, baseSepoliaChain } from '../chain';
 import { VEIL_V3_CONTRACT_ADDRESS } from '../contract';
 import {
   VEILIO_SERVICES_CONTRACT_ADDRESS,
@@ -7,6 +7,10 @@ import {
   formatServiceOrderId,
   SERVICE_ESCROW_STATES,
 } from './index';
+import {
+  getServiceEscrowAddress,
+  normalizeChainId,
+} from '../serviceContract';
 
 export const agentAuctionAbi = parseAbi([
   'function auctionCount() view returns (uint256)',
@@ -20,6 +24,19 @@ export const agentPublicClient = createPublicClient({
   chain: bnbChain,
   transport: http(process.env.NEXT_PUBLIC_BNB_CHAIN_RPC || undefined),
 });
+
+export const baseSepoliaPublicClient = createPublicClient({
+  chain: baseSepoliaChain,
+  transport: http(process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC || process.env.BASE_SEPOLIA_RPC || 'https://sepolia.base.org'),
+});
+
+export function getAgentPublicClientForChain(chainIdOrNetwork: number | string = 97) {
+  const chainId = normalizeChainId(chainIdOrNetwork);
+  if (chainId === baseSepoliaChain.id) {
+    return baseSepoliaPublicClient;
+  }
+  return agentPublicClient;
+}
 
 const stateNames = [
   'Created',
@@ -68,20 +85,24 @@ export async function readAgentAuction(id: bigint) {
   };
 }
 
-export async function readAgentServiceOrder(orderId: Hex | string) {
+export async function readAgentServiceOrder(orderId: Hex | string, chainIdOrNetwork: number | string = 97) {
+  const chainId = normalizeChainId(chainIdOrNetwork);
+  const client = getAgentPublicClientForChain(chainId);
+  const escrowAddress = getServiceEscrowAddress(chainId);
+
   if (
-    !VEILIO_SERVICES_CONTRACT_ADDRESS ||
-    VEILIO_SERVICES_CONTRACT_ADDRESS.length !== 42 ||
-    VEILIO_SERVICES_CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000'
+    !escrowAddress ||
+    escrowAddress.length !== 42 ||
+    escrowAddress === '0x0000000000000000000000000000000000000000'
   ) {
     throw new Error(
-      'NEXT_PUBLIC_SERVICE_ESCROW_CONTRACT_ADDRESS is missing or invalid. Please configure a valid deployed VeilServiceEscrow contract address.'
+      `Service escrow contract address is missing or invalid for chain ID ${chainId}.`
     );
   }
 
   const id = formatServiceOrderId(orderId);
-  const raw = await agentPublicClient.readContract({
-    address: VEILIO_SERVICES_CONTRACT_ADDRESS,
+  const raw = await client.readContract({
+    address: escrowAddress,
     abi: serviceEscrowAbi,
     functionName: 'getOrder',
     args: [id],
@@ -95,10 +116,12 @@ export async function readAgentServiceOrder(orderId: Hex | string) {
     seller: raw.seller,
     amountWei: raw.amount.toString(),
     amountBnb: formatEther(raw.amount),
+    amountEth: formatEther(raw.amount),
     deadline: raw.deadline.toString(),
     status: SERVICE_ESCROW_STATES[raw.status] ?? 'Unknown',
     createdAt: raw.createdAt.toString(),
     settledAt: raw.settledAt.toString(),
     deliverableReference: raw.deliverableReference,
+    chainId,
   };
 }

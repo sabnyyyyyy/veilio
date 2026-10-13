@@ -31,9 +31,9 @@ export default function PrivateByDesign() {
   const [activeTab, setActiveTab] = useState<QuickstartTab>('auctions');
 
   return (
-    <section className="relative overflow-hidden border-t border-white/5 py-20 md:py-24 lg:py-32">
+    <section id="service" className="relative overflow-hidden border-t border-white/5 py-20 md:py-24 lg:py-32 scroll-mt-20">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_20%_50%,rgba(201,164,92,0.08),transparent_55%)]" />
-      <div className="relative mx-auto grid max-w-7xl grid-cols-1 items-center gap-12 px-6 lg:grid-cols-2 lg:gap-20">
+      <div className="relative mx-auto grid max-w-[1440px] grid-cols-1 items-center gap-12 px-6 sm:px-10 lg:px-16 lg:grid-cols-2 lg:gap-20">
         <div className="order-2 rounded-3xl border border-white/10 bg-[#10100E]/90 p-6 shadow-2xl sm:p-9 lg:order-1">
           <div className="mb-8 flex items-center justify-between gap-4">
             <span className="font-mono text-[10px] tracking-[0.2em] text-[#C9A45C] sm:text-xs">AGENT AUCTION FLOW</span>

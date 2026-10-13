@@ -3,19 +3,36 @@ import {
   getUserConversations,
   getOrCreateConversation,
   getServiceById,
+  sameWalletAddress,
 } from '@/lib/server/servicesDb';
 import { isAddress } from 'viem';
+import { extractServiceAuth, isSolanaAddress, verifyServiceSessionAuth } from '@/lib/server/serviceAuth';
+
+/**
+ * Both handlers require a signed services session (lib/serviceAuth.ts):
+ *   GET  -> `x-veilio-auth` header; lists only the authenticated wallet's conversations.
+ *   POST -> `auth` body field (or header); the authenticated wallet becomes the buyer.
+ */
+
+function isWallet(addr: unknown): addr is string {
+  return typeof addr === 'string' && (isAddress(addr) || isSolanaAddress(addr));
+}
 
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const userAddress = searchParams.get('userAddress');
-
-    if (!userAddress || !isAddress(userAddress)) {
-      return NextResponse.json({ error: 'Valid userAddress parameter is required' }, { status: 400 });
+    const session = await verifyServiceSessionAuth(extractServiceAuth(req.headers));
+    if (!session.valid || !session.address) {
+      return NextResponse.json({ error: session.error || 'Authentication required' }, { status: session.status || 401 });
     }
 
-    const conversations = getUserConversations(userAddress);
+    // Legacy query param is still accepted but must name the authenticated wallet.
+    const { searchParams } = new URL(req.url);
+    const userAddress = searchParams.get('userAddress');
+    if (userAddress && !sameWalletAddress(userAddress, session.address)) {
+      return NextResponse.json({ error: 'userAddress does not match the authenticated wallet' }, { status: 403 });
+    }
+
+    const conversations = getUserConversations(session.address);
     return NextResponse.json({ success: true, conversations });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error';
@@ -26,24 +43,35 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { buyerAddress, sellerAddress, serviceId, serviceTitle } = body;
+    const { buyerAddress, serviceId, serviceTitle } = body;
 
-    if (!buyerAddress || !isAddress(buyerAddress)) {
-      return NextResponse.json({ error: 'Valid buyerAddress is required' }, { status: 400 });
+    const session = await verifyServiceSessionAuth(extractServiceAuth(req.headers, body));
+    if (!session.valid || !session.address) {
+      return NextResponse.json({ error: session.error || 'Authentication required' }, { status: session.status || 401 });
     }
 
-    if (!sellerAddress || !isAddress(sellerAddress)) {
-      return NextResponse.json({ error: 'Valid sellerAddress is required' }, { status: 400 });
+    if (buyerAddress && !sameWalletAddress(buyerAddress, session.address)) {
+      return NextResponse.json({ error: 'buyerAddress does not match the authenticated wallet' }, { status: 403 });
     }
 
-    if (!serviceId) {
+    if (!serviceId || typeof serviceId !== 'string') {
       return NextResponse.json({ error: 'serviceId is required' }, { status: 400 });
     }
 
+    // The seller is always the listing owner; it is never taken from the request.
     const service = getServiceById(serviceId);
-    const title = serviceTitle || service?.title || 'Custom Service Negotiation';
+    if (!service) {
+      return NextResponse.json({ error: 'Service not found' }, { status: 404 });
+    }
+    if (!isWallet(service.sellerId)) {
+      return NextResponse.json({ error: 'Service seller address is invalid' }, { status: 400 });
+    }
+    if (sameWalletAddress(service.sellerId, session.address)) {
+      return NextResponse.json({ error: 'You cannot start a conversation with yourself as the seller' }, { status: 400 });
+    }
 
-    const conv = getOrCreateConversation(buyerAddress, sellerAddress, serviceId, title);
+    const title = service.title || (typeof serviceTitle === 'string' && serviceTitle) || 'Custom Service Negotiation';
+    const conv = getOrCreateConversation(session.address, service.sellerId, serviceId, title);
     return NextResponse.json({ success: true, conversation: conv });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error';

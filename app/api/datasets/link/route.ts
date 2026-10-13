@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyMessage, createPublicClient, http, isAddress } from 'viem';
-import { bnbChain } from '@/lib/chain';
-import { VEIL_V3_ABI, VEIL_V3_CONTRACT_ADDRESS } from '@/lib/contract';
-import { getDatasetRecord, linkAuctionToDataset } from '@/lib/server/datasetDb';
-import { datasetLinkMessage } from '@/lib/assetAuth';
+import { getDatasetRecord, isDatasetLinkedTo, linkAuctionToDataset } from '@/lib/server/datasetDb';
+import { datasetLinkMessageFor, isValidAuctionIdForNetwork, parseAuctionNetwork, sameWallet } from '@/lib/auctionNetwork';
+import { isWalletAddressForNetwork, readOnchainAuction } from '@/lib/server/auctionChainState';
+import { verifyWalletSignature } from '@/lib/server/walletSignature';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { auditAssetEvent } from '@/lib/server/assetAudit';
@@ -57,50 +56,51 @@ async function loadAuctionMetadata(uri: string): Promise<Record<string, unknown>
 
 export async function POST(req: NextRequest) {
   try {
-    const { datasetId, auctionId, address, signature, timestamp } = await req.json();
+    const { datasetId, auctionId, address, signature, timestamp, network } = await req.json();
 
     if (!datasetId || !auctionId || !address || !signature || !timestamp) {
       return NextResponse.json({ error: 'Missing signed seller authorization' }, { status: 400 });
     }
+    const networkId = parseAuctionNetwork(network);
+    if (!networkId) return NextResponse.json({ error: 'Unsupported auction network.' }, { status: 400 });
     const id = String(auctionId);
     const time = Number(timestamp);
-    if (!/^[1-9]\d{0,77}$/.test(id) || !isAddress(String(address)) || !Number.isSafeInteger(time)) {
+    if (!isValidAuctionIdForNetwork(id, networkId) || !isWalletAddressForNetwork(address, networkId) || !Number.isSafeInteger(time)) {
       return NextResponse.json({ error: 'Invalid auction ID, wallet address, or timestamp.' }, { status: 400 });
     }
     if (Math.abs(Date.now() - time) > 5 * 60 * 1000) return NextResponse.json({ error: 'Authorization expired' }, { status: 401 });
-    const message = datasetLinkMessage({ datasetId: String(datasetId), auctionId: id, address: String(address), timestamp: time });
-    const valid = await verifyMessage({ address: address as `0x${string}`, message, signature: signature as `0x${string}` });
+    const message = datasetLinkMessageFor(networkId, { datasetId: String(datasetId), auctionId: id, address, timestamp: time });
+    const valid = await verifyWalletSignature({ address, message, signature });
     if (!valid) {
-      auditAssetEvent({ action: 'link', result: 'denied', auctionId: id, walletAddress: String(address), reasonCode: 'invalid_signature' });
+      auditAssetEvent({ action: 'link', result: 'denied', auctionId: id, walletAddress: address, reasonCode: 'invalid_signature' });
       return NextResponse.json({ error: 'Invalid seller signature' }, { status: 401 });
     }
 
     const record = await getDatasetRecord(datasetId);
     if (!record) return NextResponse.json({ error: 'Dataset record not found' }, { status: 404 });
-    if (record.uploader && record.uploader.toLowerCase() !== String(address).toLowerCase()) {
-      auditAssetEvent({ action: 'link', result: 'denied', assetType: record.assetType, auctionId: id, walletAddress: String(address), reasonCode: 'uploader_mismatch' });
+    if (record.uploader && !sameWallet(record.uploader, address, networkId)) {
+      auditAssetEvent({ action: 'link', result: 'denied', assetType: record.assetType, auctionId: id, walletAddress: address, reasonCode: 'uploader_mismatch' });
       return NextResponse.json({ error: 'Only the wallet that uploaded this asset may link it.' }, { status: 403 });
     }
-    if (record.auctionId && record.auctionId !== String(auctionId)) return NextResponse.json({ error: 'Asset is already linked to another auction' }, { status: 409 });
-    const client = createPublicClient({ chain: bnbChain, transport: http(process.env.NEXT_PUBLIC_BNB_CHAIN_RPC || undefined) });
-    const raw = await client.readContract({ address: VEIL_V3_CONTRACT_ADDRESS, abi: VEIL_V3_ABI, functionName: 'auctions', args: [BigInt(id)] }) as readonly unknown[];
-    if (String(raw[0]) === '0') return NextResponse.json({ error: 'Auction not found' }, { status: 404 });
-    if (String(raw[1]).toLowerCase() !== String(address).toLowerCase()) {
-      auditAssetEvent({ action: 'link', result: 'denied', assetType: record.assetType, auctionId: id, walletAddress: String(address), reasonCode: 'onchain_seller_mismatch' });
+    if (record.auctionId && !isDatasetLinkedTo(record, id, networkId)) return NextResponse.json({ error: 'Asset is already linked to another auction' }, { status: 409 });
+    const auction = await readOnchainAuction(networkId, id);
+    if (!auction) return NextResponse.json({ error: 'Auction not found' }, { status: 404 });
+    if (!sameWallet(auction.seller, address, networkId)) {
+      auditAssetEvent({ action: 'link', result: 'denied', assetType: record.assetType, auctionId: id, walletAddress: address, reasonCode: 'onchain_seller_mismatch' });
       return NextResponse.json({ error: 'Only the on-chain seller may link an asset' }, { status: 403 });
     }
 
-    const metadata = await loadAuctionMetadata(String(raw[4]));
+    const metadata = await loadAuctionMetadata(auction.imageURI);
     const asset = metadata.asset as Record<string, unknown> | undefined;
     if (!asset || asset.assetType !== (record.assetType || 'dataset')) {
-      auditAssetEvent({ action: 'link', result: 'denied', assetType: record.assetType, sizeBytes: record.size, auctionId: id, walletAddress: String(address), reasonCode: 'metadata_mismatch' });
+      auditAssetEvent({ action: 'link', result: 'denied', assetType: record.assetType, sizeBytes: record.size, auctionId: id, walletAddress: address, reasonCode: 'metadata_mismatch' });
       return NextResponse.json({ error: 'Public auction metadata does not match the uploaded asset type.' }, { status: 409 });
     }
 
-    await linkAuctionToDataset(datasetId, auctionId);
-    auditAssetEvent({ action: 'link', result: 'success', assetType: record.assetType || 'dataset', sizeBytes: record.size, auctionId: id, walletAddress: String(address) });
+    await linkAuctionToDataset(datasetId, id, networkId);
+    auditAssetEvent({ action: 'link', result: 'success', assetType: record.assetType || 'dataset', sizeBytes: record.size, auctionId: id, walletAddress: address });
     
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, networkId });
   } catch (err: unknown) {
     auditAssetEvent({ action: 'link', result: 'error', reasonCode: 'unexpected_error' });
     return NextResponse.json({ error: 'Could not verify or link the uploaded asset to this auction.' }, { status: 500 });
