@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUnifiedActivityHistory } from '@/lib/server/identityDb';
 
-export async function GET(req: NextRequest) {
+import { withJsonStores } from '@/lib/server/jsonStore';
+async function handleGET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const identityId = searchParams.get('identityId');
@@ -31,9 +32,12 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST() {
+async function handlePOST() {
   return NextResponse.json(
     { error: 'Activity ingestion is restricted to trusted chain indexers.' },
     { status: 403 }
   );
 }
+
+export const GET = withJsonStores(handleGET);
+export const POST = withJsonStores(handlePOST);

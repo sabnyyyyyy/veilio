@@ -24,6 +24,7 @@ import {
   servicesErrorStatus,
 } from '@/lib/server/serviceOrderNetwork';
 
+import { withJsonStores } from '@/lib/server/jsonStore';
 interface ReviewerConfig {
   reviewer: string | null;
   escrow: string | null;
@@ -62,7 +63,7 @@ async function getReviewerConfig(network: ServiceNetworkId): Promise<ReviewerCon
  * Reviewer preflight. `?network=` (or the dispute's order network) selects the chain;
  * defaults to BNB Testnet for backward compatibility.
  */
-export async function GET(
+async function handleGET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -84,7 +85,7 @@ export async function GET(
   }, { status: configured ? 200 : 503 });
 }
 
-export async function POST(
+async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -306,3 +307,6 @@ export async function POST(
     return NextResponse.json({ error: message }, { status: servicesErrorStatus(err) });
   }
 }
+
+export const GET = withJsonStores(handleGET);
+export const POST = withJsonStores(handlePOST);

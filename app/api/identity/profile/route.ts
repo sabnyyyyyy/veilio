@@ -7,7 +7,8 @@ import {
   type ProfileInitAuthPayload,
 } from '@/lib/server/identityDb';
 
-export async function GET(req: NextRequest) {
+import { withJsonStores } from '@/lib/server/jsonStore';
+async function handleGET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
@@ -42,7 +43,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     const body = await req.json();
     const { wallet, chain, networkId, auth } = body;
@@ -94,4 +95,5 @@ export async function POST(req: NextRequest) {
   }
 }
 
-
+export const GET = withJsonStores(handleGET);
+export const POST = withJsonStores(handlePOST);

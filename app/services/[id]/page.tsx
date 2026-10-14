@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ServicesNav from '@/components/services/ServicesNav';
+import ChainLogo, { chainInfo } from '@/components/ChainLogo';
 import { useAccount } from 'wagmi';
 import {
   Bot,
@@ -232,7 +233,10 @@ export default function ServiceDetailPage() {
                   </span>
                   <div className="text-3xl font-black text-[#F5F2E8] mt-1 flex items-baseline gap-2">
                     {service.price}{' '}
-                    <span className="text-sm font-bold text-[#C9A45C] font-mono">{service.currency}</span>
+                    <span className="inline-flex items-center gap-1.5 text-sm font-bold text-[#C9A45C] font-mono">
+                      <ChainLogo network={service.network} size={16} />
+                      {service.currency}
+                    </span>
                   </div>
                 </div>
 
@@ -246,7 +250,10 @@ export default function ServiceDetailPage() {
                   </div>
                   <div className="flex justify-between items-center">
                     <span>Payment Method:</span>
-                    <span className="font-semibold text-[#F5F2E8]">On-Chain Escrow (BNB)</span>
+                    <span className="font-semibold text-[#F5F2E8] flex items-center gap-1.5">
+                      <ChainLogo network={service.network} />
+                      On-Chain Escrow ({chainInfo(service.network).name})
+                    </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span>Terms Negotiation:</span>

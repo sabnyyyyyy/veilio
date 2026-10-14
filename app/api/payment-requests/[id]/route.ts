@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getPaymentRequest, sameWalletAddress } from '@/lib/server/servicesDb';
 import { extractServiceAuth, verifyServiceSessionAuth } from '@/lib/server/serviceAuth';
 
+import { withJsonStores } from '@/lib/server/jsonStore';
 /**
  * Payment request details for its buyer or seller. Requires a signed services session
  * (`x-veilio-auth` header, see lib/serviceAuth.ts).
  */
-export async function GET(
+async function handleGET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -27,3 +28,5 @@ export async function GET(
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const GET = withJsonStores(handleGET);

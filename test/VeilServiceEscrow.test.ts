@@ -198,6 +198,95 @@ describe('VeilServiceEscrow Contract', () => {
     });
   });
 
+  describe('Partial Refunds (renegotiated price)', () => {
+    beforeEach(async () => {
+      const latestBlock = await ethers.provider.getBlock('latest');
+      const deadline = (latestBlock?.timestamp ?? Math.floor(Date.now() / 1000)) + 86400;
+      await escrow.connect(buyer).deposit(orderId1, seller.address, deadline, { value: depositAmount });
+    });
+
+    it('returns part of the escrow to the buyer and keeps the order Funded', async () => {
+      const refundAmount = ethers.parseEther('0.3');
+      const remaining = depositAmount - refundAmount;
+
+      const tx = escrow.connect(seller).partialRefund(orderId1, refundAmount, 'Agreed price 0.7');
+      await expect(tx)
+        .to.emit(escrow, 'OrderPartiallyRefunded')
+        .withArgs(orderId1, buyer.address, refundAmount, remaining, 'Agreed price 0.7');
+      await expect(tx).to.changeEtherBalances([buyer, escrow], [refundAmount, -refundAmount]);
+
+      const order = await escrow.getOrder(orderId1);
+      expect(order.amount).to.equal(remaining);
+      expect(order.status).to.equal(1); // still Funded
+    });
+
+    it('charges the platform fee only on the reduced amount at release', async () => {
+      await escrow.connect(seller).partialRefund(orderId1, ethers.parseEther('0.3'), 'discount');
+
+      // 5% of the remaining 0.7 = 0.035; seller receives 0.665.
+      const tx = escrow.connect(buyer).releaseFunds(orderId1);
+      await expect(tx)
+        .to.emit(escrow, 'OrderReleased')
+        .withArgs(orderId1, buyer.address, seller.address, ethers.parseEther('0.665'), ethers.parseEther('0.035'));
+      await expect(tx).to.changeEtherBalances([seller, feeRecipient], [ethers.parseEther('0.665'), ethers.parseEther('0.035')]);
+    });
+
+    it('allows several reductions and a later full refund of the remainder', async () => {
+      await escrow.connect(seller).partialRefund(orderId1, ethers.parseEther('0.2'), 'first');
+      await escrow.connect(seller).partialRefund(orderId1, ethers.parseEther('0.1'), 'second');
+      expect((await escrow.getOrder(orderId1)).amount).to.equal(ethers.parseEther('0.7'));
+
+      await expect(escrow.connect(seller).refund(orderId1, 'cancel'))
+        .to.emit(escrow, 'OrderRefunded')
+        .withArgs(orderId1, buyer.address, ethers.parseEther('0.7'), 'cancel');
+    });
+
+    it('works after delivery was submitted', async () => {
+      await escrow.connect(seller).submitDelivery(orderId1, 'ipfs://deliverable');
+      await escrow.connect(seller).partialRefund(orderId1, ethers.parseEther('0.4'), 'scope reduced');
+      const order = await escrow.getOrder(orderId1);
+      expect(order.amount).to.equal(ethers.parseEther('0.6'));
+      expect(order.status).to.equal(5); // still Delivered
+    });
+
+    it('rejects callers other than the seller', async () => {
+      await expect(escrow.connect(buyer).partialRefund(orderId1, 1n, 'x')).to.be.revertedWith(
+        'Only seller can partially refund'
+      );
+      await expect(escrow.connect(stranger).partialRefund(orderId1, 1n, 'x')).to.be.revertedWith(
+        'Only seller can partially refund'
+      );
+    });
+
+    it('rejects zero and full-amount refunds', async () => {
+      await expect(escrow.connect(seller).partialRefund(orderId1, 0n, 'x')).to.be.revertedWith(
+        'Refund amount must be > 0'
+      );
+      await expect(escrow.connect(seller).partialRefund(orderId1, depositAmount, 'x')).to.be.revertedWith(
+        'Use refund for the full amount'
+      );
+      await expect(escrow.connect(seller).partialRefund(orderId1, depositAmount + 1n, 'x')).to.be.revertedWith(
+        'Use refund for the full amount'
+      );
+    });
+
+    it('rejects disputed and settled orders', async () => {
+      await escrow.connect(buyer).dispute(orderId1, 'issue');
+      await expect(escrow.connect(seller).partialRefund(orderId1, 1n, 'x')).to.be.revertedWith('Order is not funded');
+
+      await escrow.connect(reviewer).resolveDispute(orderId1, 50);
+      await expect(escrow.connect(seller).partialRefund(orderId1, 1n, 'x')).to.be.revertedWith('Order is not funded');
+    });
+
+    it('lets a dispute split only the reduced amount', async () => {
+      await escrow.connect(seller).partialRefund(orderId1, ethers.parseEther('0.5'), 'discount');
+      await escrow.connect(buyer).dispute(orderId1, 'issue');
+      await expect(escrow.connect(reviewer).resolveDispute(orderId1, 50))
+        .to.emit(escrow, 'DisputeResolved')
+        .withArgs(orderId1, ethers.parseEther('0.25'), ethers.parseEther('0.25'));
+    });
+  });
+
   describe('Delivery Submission & Work Approvals', () => {
     beforeEach(async () => {
       const latestBlock = await ethers.provider.getBlock('latest');

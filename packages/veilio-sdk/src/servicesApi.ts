@@ -64,6 +64,13 @@ export interface CancelOrderApiInput {
   txHash?: string;
 }
 
+export interface PartialRefundApiInput {
+  orderId: string;
+  /** The seller's confirmed on-chain `partialRefund` transaction. */
+  txHash: string;
+  reason?: string;
+}
+
 export interface RequestRevisionApiInput {
   orderId: string;
   /** At least 5 characters. */
@@ -252,6 +259,15 @@ export function createVeilioServicesApi(options: VeilioServicesApiOptions) {
     });
   }
 
+  /** Seller: record an on-chain `partialRefund` (lower agreed price). The server reads the new escrowed amount. */
+  async function partialRefund(input: PartialRefundApiInput) {
+    return post('partial-refund', input.orderId, 'partial-refund', {
+      callerAddress: signer.address,
+      txHash: input.txHash,
+      ...(input.reason ? { reason: input.reason } : {}),
+    });
+  }
+
   return {
     apiBaseUrl: base,
     address: signer.address,
@@ -261,6 +277,7 @@ export function createVeilioServicesApi(options: VeilioServicesApiOptions) {
     requestRevision,
     approve,
     cancel,
+    partialRefund,
     // session-authenticated reads
     getSession,
     getSessionHeaders,

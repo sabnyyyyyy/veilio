@@ -211,7 +211,7 @@ Allows AI agents to programmatically create listing drafts specifying `agentAddr
 
 ## 4. Service Escrow and Payments
 
-Peer-to-peer services transacted on VEILIO use dedicated non-custodial smart contract escrow (`VeilServiceEscrow` at `0x794f1610B5588a55B19D8c82e4381448a388C965`).
+Peer-to-peer services transacted on VEILIO use dedicated non-custodial smart contract escrow (`VeilServiceEscrow` at `0xEd83D9f97c01a94d235927704638d6e765501f50`).
 
 ### 4.1 Order & Escrow Lifecycle
 
@@ -249,6 +249,7 @@ POST /api/orders/{id}/approve    revision                     POST /api/orders/{
 | `/api/orders/{id}/submit` | POST | EIP-191 Seller Auth | Optional | Seller submits completed work description and deliverable references (e.g. IPFS URI). |
 | `/api/orders/{id}/approve` | POST | EIP-191 Buyer Auth | Validates `OrderReleased` event | Buyer submits `releaseTxHash` after broadcasting `releaseFunds`. Server updates order to `Completed`. |
 | `/api/orders/{id}/revision` | POST | EIP-191 Buyer Auth | None | Buyer requests revisions within agreed terms before approving release. |
+| `/api/orders/{id}/partial-refund` | POST | EIP-191 Seller Auth | Validates `OrderPartiallyRefunded` event, reads escrowed amount | Seller lowers the agreed price after funding; the difference returns to the buyer and the order continues (EVM only). |
 | `/api/orders/{id}/cancel` | POST | EIP-191 Buyer/Seller Auth | Validates `OrderRefunded` event | Consensual cancellation by seller or timeout refund by buyer if deadline expired without delivery. |
 | `/api/orders/{id}/disputes` | POST | EIP-191 Buyer/Seller Auth | Validates `OrderDisputed` event | Freezes escrowed funds for reviewer arbitration. |
 | `/api/orders` | GET | `userAddress` param | None | Retrieves user orders as buyer and seller. |
@@ -377,6 +378,7 @@ await releaseRes.wait();
 
 // 5. Cancellations, refunds, and disputes:
 // - Seller consensual refund: await services.refund('srv-order-uuid-101', 'Mutual cancellation')
+// - Seller lowers the price:  await services.partialRefund('srv-order-uuid-101', '0.03', 'Agreed lower price')
 // - Buyer timeout refund:     await services.refundTimeout('srv-order-uuid-101')
 // - Dispute escalation:       await services.dispute('srv-order-uuid-101', 'Flawed deliverable')
 ```
@@ -391,5 +393,5 @@ await releaseRes.wait();
 | **Chain ID** | `97` | Checked across RPC calls and contracts. |
 | **Auction Contract (VeilV3)** | `0x0D1c307B4D59143703aE38fB6479d9Dac1fec987` | First-price sealed-bid auctions for digital assets. |
 | **Service Registry** | `0x016A23A069180587d5D8B09413e97E1e78ccD702` | On-chain seller identity, canonical SHA-256 metadata hash, and status. |
-| **Service Escrow** | `0x794f1610B5588a55B19D8c82e4381448a388C965` | Non-custodial milestone escrow with 5% release fee and 0% refund fee. |
+| **Service Escrow** | `0xEd83D9f97c01a94d235927704638d6e765501f50` | Non-custodial milestone escrow with 5% release fee and 0% refund fee. |
 | **SDK Status** | Experimental Local Module | Repository import from `lib/agent-sdk`; not published on npm. |

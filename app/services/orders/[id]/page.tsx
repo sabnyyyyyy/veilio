@@ -29,6 +29,7 @@ import {
   XCircle,
   Check,
   Wallet,
+  BadgePercent,
 } from 'lucide-react';
 import type { ServiceOrder, OrderSubmission, OrderRevision, ServiceDispute } from '@/lib/server/servicesDb';
 import DisputeResolutionPanel from '@/components/services/DisputeResolutionPanel';
@@ -40,10 +41,12 @@ import {
   createSubmitDeliveryInstruction,
   createReleaseFundsInstruction,
   createCancelOrRefundInstruction,
+  createPartialRefundInstruction,
   getSolanaServiceEscrowProgramId,
   getSolanaServiceFeeRecipient,
   getSolanaServiceReviewer,
   parseSolToLamports,
+  formatLamportsToSol,
   toSolanaEscrowOrderIdHex,
 } from '@/lib/cross-chain/solanaServiceEscrow';
 import { saveServiceActivity } from '@/lib/walletStorage';
@@ -935,6 +938,109 @@ export default function OrderDetailPage() {
     }
   };
 
+  // Seller lowers the agreed price: the difference goes back to the buyer and the order stays active.
+  const [showPriceForm, setShowPriceForm] = useState(false);
+  const [newPriceInput, setNewPriceInput] = useState('');
+  const [priceReason, setPriceReason] = useState('');
+  const [reducingPrice, setReducingPrice] = useState(false);
+
+  // SOL uses 9 decimals (lamports), EVM 18 (wei).
+  const toBaseUnits = (value: string) => (isSolanaOrder ? parseSolToLamports(value) : parseEther(value));
+  const fromBaseUnits = (value: bigint) => (isSolanaOrder ? formatLamportsToSol(value) : formatEther(value));
+
+  const priceRefundPreview = (() => {
+    if (!order || !newPriceInput) return null;
+    try {
+      const next = toBaseUnits(newPriceInput.trim());
+      const diff = toBaseUnits(order.priceSnapshot) - next;
+      return diff > 0n && next > 0n ? fromBaseUnits(diff) : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  const handleReducePrice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const sellerAddress = isSolanaOrder ? solanaAddress : address;
+    if (!order || !sellerAddress || !isSeller) return;
+
+    if (!priceRefundPreview) {
+      setTxErrorMessage(`Enter a new price above 0 and below the current ${order.priceSnapshot} ${currencyLabel}.`);
+      setTxStage('failed');
+      return;
+    }
+    if (!isSolanaOrder && chainId && chainId !== expectedChainId) {
+      setTxErrorMessage(`Please switch your wallet network to ${expectedNetworkName} before adjusting the price.`);
+      setTxStage('failed');
+      return;
+    }
+
+    const newPrice = newPriceInput.trim();
+    const reason = priceReason.trim() || `Price renegotiated to ${newPrice} ${currencyLabel}`;
+
+    try {
+      setReducingPrice(true);
+      setTxActionLabel('Adjust Agreed Price');
+      setTxStage('awaiting_wallet');
+      setTxErrorMessage(null);
+      setTxSuccessMessage(null);
+      setActiveTxHash(null);
+
+      const refund = toBaseUnits(order.priceSnapshot) - toBaseUnits(newPrice);
+      let txHash: string;
+      if (isSolanaOrder) {
+        txHash = await sendSolanaTx(createPartialRefundInstruction({
+          programId: getSolanaServiceEscrowProgramId(),
+          seller: sellerAddress,
+          buyer: order.buyerId,
+          orderId: toSolanaEscrowOrderIdHex(order.escrowReference || order.id),
+          refundLamports: refund,
+          reason,
+        }));
+        setActiveTxHash(txHash);
+      } else {
+        txHash = await writeContractAsync({
+          address: targetEscrowAddress,
+          abi: VEIL_SERVICE_ESCROW_ABI,
+          functionName: 'partialRefund',
+          args: [getBytes32OrderId(order.id), refund, reason],
+        });
+        setActiveTxHash(txHash);
+        setTxStage('mining');
+
+        if (publicClient) {
+          const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash as `0x${string}` });
+          if (receipt.status !== 'success') throw new Error('On-chain partial refund transaction reverted.');
+        }
+      }
+
+      setTxStage('verifying');
+      const authData = await signAuthMessage('partial-refund');
+      const res = await fetch(`/api/orders/${order.id}/partial-refund`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callerAddress: sellerAddress, reason, txHash, auth: authData }),
+      });
+      const data = await res.json();
+      if (!data.success || !data.order) throw new Error(data.error || 'Server failed to verify the partial refund');
+
+      setOrder(data.order);
+      setTxStage('confirmed');
+      setTxSuccessMessage(`Price lowered to ${data.newPrice} ${currencyLabel}. ${data.refundAmount} ${currencyLabel} was returned to the buyer on-chain.`);
+      setShowPriceForm(false);
+      setNewPriceInput('');
+      setPriceReason('');
+      fetchOrderData();
+    } catch (err: any) {
+      console.error('Partial refund error:', err);
+      const isRejection = err.message?.includes('User rejected') || err.message?.includes('rejected') || err.code === 4001;
+      setTxStage('failed');
+      setTxErrorMessage(isRejection ? 'Transaction cancelled in wallet.' : (err.shortMessage || err.message || 'Price adjustment failed'));
+    } finally {
+      setReducingPrice(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="w-full min-h-[50vh] flex items-center justify-center p-12">
@@ -1085,6 +1191,11 @@ export default function OrderDetailPage() {
                 <div className="text-2xl font-black text-[#F5F2E8]">
                   {order.priceSnapshot} <span className="text-sm text-[#C9A45C] font-mono">{order.currency}</span>
                 </div>
+                {order.originalPriceSnapshot && order.originalPriceSnapshot !== order.priceSnapshot && (
+                  <div className="text-[11px] text-[#8E8A80]">
+                    Originally <span className="line-through">{order.originalPriceSnapshot} {order.currency}</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1276,6 +1387,88 @@ export default function OrderDetailPage() {
                       </button>
                     </div>
                   </form>
+                </div>
+              )}
+
+              {/* Seller Price Adjustment (partial refund) */}
+              {isSeller && order.paymentStatus === 'Funded' &&
+                ['Funded', 'InProgress', 'InReview', 'RevisionRequested'].includes(order.status) && (
+                <div className="p-6 rounded-2xl bg-[#151512] border border-[#C9A45C]/25 space-y-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 text-[#E6CC91] font-bold text-xs uppercase tracking-wider">
+                        <BadgePercent className="w-4 h-4" />
+                        <span>Adjust Agreed Price</span>
+                      </div>
+                      <p className="text-xs text-[#A8A397] leading-relaxed max-w-lg">
+                        Agreed on a lower price in chat? Set the new price and the difference is refunded to the buyer on-chain right away. The order keeps running — no need to cancel.
+                      </p>
+                    </div>
+                    {!showPriceForm && (
+                      <button
+                        type="button"
+                        onClick={() => setShowPriceForm(true)}
+                        className="shrink-0 py-2 px-4 rounded-xl border border-[#C9A45C]/40 text-[#E6CC91] text-xs font-bold uppercase tracking-wider hover:bg-[#C9A45C]/10 transition-colors"
+                      >
+                        Lower price
+                      </button>
+                    )}
+                  </div>
+
+                  {showPriceForm && (
+                    <form onSubmit={handleReducePrice} className="space-y-3 pt-3 border-t border-white/5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <label className="space-y-1.5">
+                          <span className="block text-[10px] uppercase tracking-widest text-[#A8A397] font-bold">New price ({currencyLabel})</span>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            step="any"
+                            required
+                            value={newPriceInput}
+                            onChange={(e) => setNewPriceInput(e.target.value)}
+                            placeholder={`Below ${order.priceSnapshot}`}
+                            className="w-full rounded-xl border border-white/10 bg-[#0A0A09] px-3 py-2.5 text-sm font-mono text-[#F5F2E8] outline-none focus:border-[#C9A45C]/60"
+                          />
+                        </label>
+                        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
+                          <span className="block text-[10px] uppercase tracking-widest text-[#A8A397] font-bold">Refund to buyer</span>
+                          <span className={`mt-1 block text-sm font-bold font-mono ${priceRefundPreview ? 'text-[#E6CC91]' : 'text-[#5E5B53]'}`}>
+                            {priceRefundPreview ? `${priceRefundPreview} ${currencyLabel}` : '—'}
+                          </span>
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        maxLength={200}
+                        value={priceReason}
+                        onChange={(e) => setPriceReason(e.target.value)}
+                        placeholder="Note for the buyer (optional), e.g. reduced scope"
+                        className="w-full rounded-xl border border-white/10 bg-[#0A0A09] px-3 py-2.5 text-xs text-[#F5F2E8] outline-none focus:border-[#C9A45C]/60"
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="submit"
+                          disabled={reducingPrice || !priceRefundPreview}
+                          className="py-2.5 px-5 bg-[#C9A45C] hover:bg-[#E6CC91] text-[#0A0A09] text-xs font-bold uppercase tracking-wider rounded-xl transition-all flex items-center gap-2 disabled:opacity-50"
+                        >
+                          {reducingPrice ? <Loader2 className="w-4 h-4 animate-spin" /> : <BadgePercent className="w-4 h-4" />}
+                          <span>{priceRefundPreview ? `Refund ${priceRefundPreview} ${currencyLabel}` : 'Confirm new price'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setShowPriceForm(false); setNewPriceInput(''); setPriceReason(''); }}
+                          className="py-2.5 px-4 text-xs font-semibold uppercase tracking-wider text-[#A8A397] hover:text-[#F5F2E8]"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-[#77746B]">
+                        Lowering the price can&apos;t be undone. To return everything, use Cancel &amp; Refund Buyer instead.
+                      </p>
+                    </form>
+                  )}
                 </div>
               )}
 

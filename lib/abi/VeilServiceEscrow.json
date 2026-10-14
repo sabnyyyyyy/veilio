@@ -75,6 +75,31 @@
       "anonymous": false,
       "inputs": [
         {
+          "indexed": true,
+          "internalType": "bytes32",
+          "name": "orderId",
+          "type": "bytes32"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "buyer",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "refundAmount",
+          "type": "uint256"
+        }
+      ],
+      "name": "DisputeTimedOut",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
           "indexed": false,
           "internalType": "address",
           "name": "feeRecipient",
@@ -150,6 +175,43 @@
         }
       ],
       "name": "OrderFunded",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "bytes32",
+          "name": "orderId",
+          "type": "bytes32"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "buyer",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "refundAmount",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "remainingAmount",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "reason",
+          "type": "string"
+        }
+      ],
+      "name": "OrderPartiallyRefunded",
       "type": "event"
     },
     {
@@ -273,6 +335,19 @@
     },
     {
       "inputs": [],
+      "name": "DISPUTE_TIMEOUT",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
       "name": "MAX_FEE_BPS",
       "outputs": [
         {
@@ -341,6 +416,25 @@
       "name": "dispute",
       "outputs": [],
       "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "name": "disputedAt",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
       "type": "function"
     },
     {
@@ -430,6 +524,25 @@
           "type": "bytes32"
         }
       ],
+      "name": "orderFeeBps",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
       "name": "orders",
       "outputs": [
         {
@@ -492,6 +605,29 @@
         }
       ],
       "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "orderId",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "uint256",
+          "name": "refundAmount",
+          "type": "uint256"
+        },
+        {
+          "internalType": "string",
+          "name": "reason",
+          "type": "string"
+        }
+      ],
+      "name": "partialRefund",
+      "outputs": [],
+      "stateMutability": "nonpayable",
       "type": "function"
     },
     {
@@ -571,6 +707,19 @@
         }
       ],
       "name": "resolveDispute",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "orderId",
+          "type": "bytes32"
+        }
+      ],
+      "name": "resolveDisputeTimeout",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"

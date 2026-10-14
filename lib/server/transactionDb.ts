@@ -1,5 +1,7 @@
 import fs from 'fs';
 import path from 'path';
+import { getDataDir } from './dataDir';
+import { readJsonStore, writeJsonStore } from './jsonStore';
 import { saveRefundEvidence, type RefundEvidence } from './refundDb';
 import { computeCanonicalEvidenceHash, type CanonicalEvidencePackage } from './evidenceHash';
 import type { GeminiValidationOutput } from './gemini';
@@ -107,7 +109,7 @@ interface TransactionsDatabase {
   evidence: Record<string, DeliveryEvidenceRecord[]>;
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR = getDataDir();
 const DB_FILE = path.join(DATA_DIR, 'db', 'transactions.json');
 
 function ensureDirectories() {
@@ -117,6 +119,16 @@ function ensureDirectories() {
 }
 
 function readDb(): TransactionsDatabase {
+  const stored = readJsonStore<Partial<TransactionsDatabase>>('transactions');
+  if (stored !== undefined) {
+    return {
+      transactions: stored?.transactions || {},
+      messages: stored?.messages || {},
+      disputes: stored?.disputes || {},
+      evidence: stored?.evidence || {},
+    };
+  }
+
   ensureDirectories();
   if (!fs.existsSync(DB_FILE)) {
     return { transactions: {}, messages: {}, disputes: {}, evidence: {} };
@@ -137,6 +149,7 @@ function readDb(): TransactionsDatabase {
 }
 
 function writeDb(data: TransactionsDatabase) {
+  if (writeJsonStore('transactions', data)) return;
   ensureDirectories();
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
 }

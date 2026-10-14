@@ -11,6 +11,7 @@ import {
 import { readEvmAuctionReviewer, readOnchainAuction } from '@/lib/server/auctionChainState';
 import { verifyAuctionAuth } from '@/lib/server/auctionAuth';
 
+import { withJsonStores } from '@/lib/server/jsonStore';
 const MAX_SOLANA_LOOKUPS = 100;
 
 /**
@@ -19,7 +20,7 @@ const MAX_SOLANA_LOOKUPS = 100;
  * EVM: signer must be the auction contract's reviewer(). Solana: only auctions
  * whose on-chain reviewer is the signer are returned.
  */
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   try {
     const params = req.nextUrl.searchParams;
     const networkId = parseAuctionNetwork(params.get('network'));
@@ -68,7 +69,7 @@ export async function GET(req: NextRequest) {
  * Stores refund evidence. Only the on-chain winner of an auction in Inspection
  * (or RefundRequested) may submit, proven by a signed `submit-refund-evidence`.
  */
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     const body = await req.json();
     const { auctionId, network, auth, disputedCriterion, expectedValue, actualValue, reason } = body;
@@ -119,3 +120,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const GET = withJsonStores(handleGET);
+export const POST = withJsonStores(handlePOST);

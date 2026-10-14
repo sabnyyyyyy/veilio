@@ -2,6 +2,7 @@ import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 
 process.env.HARDHAT_RUNNING = "true";
 
@@ -24,6 +25,14 @@ for (const envFile of [".env.local", ".env.testnet"]) {
       }
     }
   }
+}
+
+// `hardhat test` must never write fixtures into the real data/ stores (services, refunds, ...).
+// Point every file-backed store (lib/server/dataDir.ts) at a throwaway dir for the run.
+if (process.argv.includes("test") && !process.env.VEILIO_DATA_DIR) {
+  const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "veilio-test-data-"));
+  process.env.VEILIO_DATA_DIR = testDataDir;
+  process.on("exit", () => fs.rmSync(testDataDir, { recursive: true, force: true }));
 }
 
 const config: HardhatUserConfig = {

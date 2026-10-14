@@ -7,7 +7,8 @@ import { readOnchainAuction } from '@/lib/server/auctionChainState';
 import { verifyAuctionAuth } from '@/lib/server/auctionAuth';
 
 
-export async function POST(
+import { withJsonStores } from '@/lib/server/jsonStore';
+async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -149,3 +150,5 @@ export async function POST(
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const POST = withJsonStores(handlePOST);

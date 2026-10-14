@@ -4,7 +4,8 @@ import { readOnchainAuction } from '@/lib/server/auctionChainState';
 import { getOrCreateTransaction, getDispute } from '@/lib/server/transactionDb';
 import { getDatasetRecordByAuctionId } from '@/lib/server/datasetDb';
 
-export async function GET(
+import { withJsonStores } from '@/lib/server/jsonStore';
+async function handleGET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -91,3 +92,5 @@ export async function GET(
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const GET = withJsonStores(handleGET);

@@ -128,6 +128,7 @@ await release.wait();
 
 // Other exits (fee-free refunds):
 // await services.refund(orderId, 'Mutual cancellation');  // seller-initiated
+// await services.partialRefund(orderId, '0.03', 'Agreed lower price'); // seller returns part, order continues
 // await services.refundTimeout(orderId);                   // buyer, after the deadline
 // await services.dispute(orderId, 'Deliverable does not match scope');`;
 
@@ -245,6 +246,7 @@ const SERVICE_ENDPOINTS: Endpoint[] = [
   { method: 'POST', path: '/api/orders/:id/submit', description: 'Seller submits delivery notes & deliverable links', auth: 'Signature' },
   { method: 'POST', path: '/api/orders/:id/revision', description: 'Buyer requests a revision within agreed rounds', auth: 'Signature' },
   { method: 'POST', path: '/api/orders/:id/approve', description: 'Buyer confirms release with the releaseFunds tx hash', auth: 'Signature' },
+  { method: 'POST', path: '/api/orders/:id/partial-refund', description: 'Seller lowers the agreed price (OrderPartiallyRefunded)', auth: 'Signature' },
   { method: 'POST', path: '/api/orders/:id/cancel', description: 'Consensual cancel or timeout refund (OrderRefunded)', auth: 'Signature' },
   { method: 'POST', path: '/api/orders/:id/disputes', description: 'Freeze escrow for reviewer arbitration', auth: 'Signature' },
   { method: 'POST', path: '/api/orders', description: 'List your orders as buyer and seller', auth: 'Signature' },

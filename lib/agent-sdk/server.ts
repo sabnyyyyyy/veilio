@@ -1,4 +1,4 @@
-import { createPublicClient, http, parseAbi, formatEther, type Hex, type Address } from 'viem';
+import { createPublicClient, fallback, http, parseAbi, formatEther, type Hex, type Address } from 'viem';
 import { bnbChain, baseSepoliaChain } from '../chain';
 import { VEIL_V3_CONTRACT_ADDRESS } from '../contract';
 import {
@@ -22,7 +22,7 @@ export { serviceEscrowAbi };
 
 export const agentPublicClient = createPublicClient({
   chain: bnbChain,
-  transport: http(process.env.NEXT_PUBLIC_BNB_CHAIN_RPC || undefined),
+  transport: fallback(bnbChain.rpcUrls.default.http.map((url) => http(url))),
 });
 
 export const baseSepoliaPublicClient = createPublicClient({
@@ -51,7 +51,8 @@ const stateNames = [
 ] as const;
 
 export async function readAgentAuction(id: bigint) {
-  const [auction, currentState] = await Promise.all([
+  // getAuctionState reverts for unknown IDs, so check existence before trusting its result.
+  const [auction, stateResult] = await Promise.all([
     agentPublicClient.readContract({
       address: VEIL_V3_CONTRACT_ADDRESS,
       abi: agentAuctionAbi,
@@ -63,9 +64,11 @@ export async function readAgentAuction(id: bigint) {
       abi: agentAuctionAbi,
       functionName: 'getAuctionState',
       args: [id],
-    }),
+    }).then((value) => ({ value }), (error: unknown) => ({ error })),
   ]);
   if (auction[0] === 0n) return null;
+  if ('error' in stateResult) throw stateResult.error;
+  const currentState = stateResult.value;
   return {
     id: auction[0].toString(),
     seller: auction[1],

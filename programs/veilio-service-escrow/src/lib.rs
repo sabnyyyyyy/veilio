@@ -301,6 +301,64 @@ pub mod veilio_service_escrow {
         Ok(())
     }
 
+    /// Seller returns part of the escrow to the buyer (renegotiated lower price); the order stays active.
+    /// Use `cancel_or_refund` to return everything. The vault must stay rent-exempt.
+    pub fn partial_refund(ctx: Context<PartialRefund>, refund_amount: u64, reason: String) -> Result<()> {
+        let clock = Clock::get()?;
+        let escrow = &mut ctx.accounts.escrow_order;
+
+        require!(
+            escrow.status == ServiceEscrowStatus::Funded || escrow.status == ServiceEscrowStatus::Delivered,
+            EscrowError::OrderNotFunded
+        );
+        require!(
+            refund_amount > 0 && refund_amount < escrow.amount,
+            EscrowError::InvalidPartialRefundAmount
+        );
+
+        let remaining = escrow
+            .amount
+            .checked_sub(refund_amount)
+            .ok_or(EscrowError::MathOverflow)?;
+        let vault_after = ctx
+            .accounts
+            .vault
+            .lamports()
+            .checked_sub(refund_amount)
+            .ok_or(EscrowError::MathOverflow)?;
+        require!(
+            vault_after >= Rent::get()?.minimum_balance(0),
+            EscrowError::PartialRefundBelowRent
+        );
+
+        let order_id = escrow.order_id;
+        let vault_bump = escrow.vault_bump;
+        let signer_seeds: &[&[&[u8]]] = &[&[VAULT_SEED, order_id.as_ref(), &[vault_bump]]];
+
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.system_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.vault.to_account_info(),
+                to: ctx.accounts.buyer.to_account_info(),
+            },
+            signer_seeds,
+        );
+        system_program::transfer(cpi_ctx, refund_amount)?;
+
+        escrow.amount = remaining;
+
+        emit!(OrderPartiallyRefundedEvent {
+            order_id,
+            buyer: escrow.buyer,
+            refund_amount,
+            remaining_amount: remaining,
+            reason,
+            timestamp: clock.unix_timestamp,
+        });
+
+        Ok(())
+    }
+
     /// Flags an order as disputed, awaiting designated reviewer resolution.
     pub fn dispute(ctx: Context<DisputeOrder>, reason: String) -> Result<()> {
         let escrow = &mut ctx.accounts.escrow_order;
@@ -573,6 +631,34 @@ pub struct CancelOrRefund<'info> {
 }
 
 #[derive(Accounts)]
+pub struct PartialRefund<'info> {
+    #[account(
+        mut,
+        seeds = [ESCROW_SEED, escrow_order.order_id.as_ref()],
+        bump = escrow_order.bump,
+        has_one = buyer @ EscrowError::UnauthorizedBuyer,
+        has_one = seller @ EscrowError::UnauthorizedSeller
+    )]
+    pub escrow_order: Account<'info, EscrowOrder>,
+
+    /// CHECK: Vault PDA holding escrow lamports
+    #[account(
+        mut,
+        seeds = [VAULT_SEED, escrow_order.order_id.as_ref()],
+        bump = escrow_order.vault_bump
+    )]
+    pub vault: AccountInfo<'info>,
+
+    pub seller: Signer<'info>,
+
+    /// CHECK: Buyer account receiving the partial refund
+    #[account(mut)]
+    pub buyer: AccountInfo<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct DisputeOrder<'info> {
     #[account(
         mut,
@@ -718,6 +804,16 @@ pub struct OrderRefundedEvent {
 }
 
 #[event]
+pub struct OrderPartiallyRefundedEvent {
+    pub order_id: [u8; 32],
+    pub buyer: Pubkey,
+    pub refund_amount: u64,
+    pub remaining_amount: u64,
+    pub reason: String,
+    pub timestamp: i64,
+}
+
+#[event]
 pub struct OrderDisputedEvent {
     pub order_id: [u8; 32],
     pub opened_by: Pubkey,
@@ -790,4 +886,8 @@ pub enum EscrowError {
     FeeTooHigh,
     #[msg("The platform reviewer cannot be the buyer or seller of this order")]
     ReviewerNotIndependent,
+    #[msg("Partial refund must be greater than zero and less than the escrowed amount")]
+    InvalidPartialRefundAmount,
+    #[msg("Partial refund would leave the vault below the rent-exempt minimum")]
+    PartialRefundBelowRent,
 }

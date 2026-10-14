@@ -30,13 +30,17 @@ export function generateAuthNonce(): string {
 }
 
 /** Exact message the VEILIO API verifies; must match the server byte-for-byte. */
+// Wallets show this text when signing, so it states plainly that nothing is paid.
+const SERVICE_ACTION_PURPOSE = 'Purpose: Off-chain authorization only. This signature does not move funds and costs no gas.';
+const SERVICE_SESSION_PURPOSE = 'Purpose: Sign in to VEILIO Services. This is not a transaction: no funds move and no gas is charged.';
+
 export function createServiceAuthMessage(input: {
   action: string;
   orderId: string;
   address: string;
   timestamp: number;
   nonce: string;
-}): string {
+}, purpose?: string): string {
   return [
     'VEILIO SERVICES AUTHORIZATION V1',
     `Action: ${input.action}`,
@@ -44,7 +48,7 @@ export function createServiceAuthMessage(input: {
     `Wallet: ${input.address.toLowerCase()}`,
     `Timestamp: ${input.timestamp}`,
     `Nonce: ${input.nonce}`,
-    'Purpose: Authorize off-chain state change for VEILIO Services escrow.',
+    purpose ?? (input.action === 'services-session' ? SERVICE_SESSION_PURPOSE : SERVICE_ACTION_PURPOSE),
   ].join('\n');
 }
 

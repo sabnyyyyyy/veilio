@@ -8,6 +8,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { getDataDir } from '../dataDir';
 import { isAssetRedisConfigured, assetRedisCommand } from '../redisRest';
 
 export interface ReplayRecord {
@@ -20,7 +21,7 @@ export interface ReplayRecord {
   recordedAt: number;
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR = getDataDir();
 const DB_DIR = path.join(DATA_DIR, 'db');
 const REPLAY_DIR = path.join(DB_DIR, 'replays');
 const REPLAY_DB_FILE = path.join(DB_DIR, 'replays.json');

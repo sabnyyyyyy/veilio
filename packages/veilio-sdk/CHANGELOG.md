@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.0
+
+### Added
+- **Price reductions after funding:** `services.partialRefund(orderId, amount, reason)` (EVM) and
+  `solana.partialRefund(orderId, amountSol, reason)` let the seller return part of a funded order to the
+  buyer after agreeing a lower price; the order stays active and the platform fee applies to the reduced
+  amount at release. `createVeilioServicesApi().partialRefund({ orderId, txHash, reason? })` records it with
+  the VEILIO API. New exports: `createPartialRefundInstruction`, ABI entries `partialRefund` and
+  `OrderPartiallyRefunded`.
+
+### Changed
+- **Redeployed Services escrow:** `VEILIO_DEPLOYMENTS` now points `serviceEscrow` at the contract with
+  `partialRefund`: BNB Testnet `0xEd83D9f97c01a94d235927704638d6e765501f50`, Base Sepolia
+  `0x9679f83560076921f364574Ff341c37B7fcFd9A4`. Deposits to the previous escrow are no longer accepted
+  by the VEILIO API; pass `contractAddress` explicitly only to manage orders funded on the old contract.
+- Signed-message purpose lines now state plainly that signing moves no funds and costs no gas. The API
+  still accepts signatures over the previous wording, so older SDK versions keep working.
+
 ## 0.3.0
 
 ### Added

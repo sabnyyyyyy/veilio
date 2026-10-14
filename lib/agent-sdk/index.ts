@@ -45,7 +45,7 @@ export const VEILIO_DEPLOYMENTS = {
       chainId: 84532 as const,
       auction: BASE_SEPOLIA_AUCTION_ADDRESS as Address,
       serviceEscrow: ((typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_BASE_SEPOLIA_SERVICE_ESCROW_ADDRESS : '') ||
-        '0x794f1610B5588a55B19D8c82e4381448a388C965') as Address,
+        '0x9679f83560076921f364574Ff341c37B7fcFd9A4') as Address,
     };
   },
 };
@@ -249,6 +249,7 @@ export const serviceEscrowAbi = parseAbi([
   'function releaseFunds(bytes32 orderId)',
   'function refund(bytes32 orderId, string reason)',
   'function cancelOrder(bytes32 orderId, string reason)',
+  'function partialRefund(bytes32 orderId, uint256 refundAmount, string reason)',
   'function dispute(bytes32 orderId, string reason)',
   'function resolveDispute(bytes32 orderId, uint8 splitToBuyerPercent)',
   'function withdrawPending()',
@@ -262,6 +263,7 @@ export const serviceEscrowAbi = parseAbi([
   'event DeliverySubmitted(bytes32 indexed orderId, address indexed seller, string deliverableReference)',
   'event OrderReleased(bytes32 indexed orderId, address indexed buyer, address indexed seller, uint256 sellerAmount, uint256 feeAmount)',
   'event OrderRefunded(bytes32 indexed orderId, address indexed buyer, uint256 refundAmount, string reason)',
+  'event OrderPartiallyRefunded(bytes32 indexed orderId, address indexed buyer, uint256 refundAmount, uint256 remainingAmount, string reason)',
   'event OrderDisputed(bytes32 indexed orderId, address indexed openedBy, string reason)',
   'event DisputeResolved(bytes32 indexed orderId, uint256 buyerShare, uint256 sellerShare)',
   'event WithdrawalPending(address indexed recipient, uint256 amount)',
@@ -593,6 +595,27 @@ export function createVeilioServicesClient(options: VeilioServicesOptions) {
     return makeTxResult(txHash);
   }
 
+  /** Seller returns part of the escrow (amount in native units, e.g. "0.03") after agreeing a lower price. */
+  async function partialRefund(orderId: Hex | string, amount: string, reason: string): Promise<ServicesTxResult> {
+    const walletClient = options.walletClient;
+    if (!walletClient) {
+      throw new VeilioSdkError({ code: 'WALLET_REQUIRED', message: 'A walletClient is required to partially refund the escrow order.' });
+    }
+    assertWalletChain(walletClient);
+
+    const id = formatServiceOrderId(orderId);
+    const txHash = await walletClient.writeContract({
+      address,
+      abi: serviceEscrowAbi,
+      functionName: 'partialRefund',
+      args: [id, parseEther(String(amount)), reason || 'Price reduced'],
+      account: walletClient.account ?? getServicesAccount(),
+      chain: walletClient.chain ?? undefined,
+    });
+
+    return makeTxResult(txHash);
+  }
+
   async function refundTimeout(orderId: Hex | string, reason?: string): Promise<ServicesTxResult> {
     return cancelOrder(orderId, reason || 'Buyer timeout refund');
   }
@@ -716,6 +739,7 @@ export function createVeilioServicesClient(options: VeilioServicesOptions) {
     releaseFunds,
     refund,
     cancelOrder,
+    partialRefund,
     refundTimeout,
     dispute,
     resolveDispute,

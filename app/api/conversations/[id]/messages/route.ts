@@ -4,11 +4,14 @@ import {
   getConversationMessages,
   addServiceMessage,
   getPaymentRequest,
+  getServiceById,
   sameWalletAddress,
   type Conversation,
 } from '@/lib/server/servicesDb';
 import { extractServiceAuth, verifyServiceSessionAuth } from '@/lib/server/serviceAuth';
+import { allowChatMessage, impersonatesSystemNotice, sanitizeChatText } from '@/lib/server/chatSafety';
 
+import { withJsonStores } from '@/lib/server/jsonStore';
 /**
  * Both handlers require a signed services session (lib/serviceAuth.ts) from a
  * conversation participant: GET via the `x-veilio-auth` header, POST via `auth` in the
@@ -19,7 +22,7 @@ function isParticipant(conversation: Conversation, address: string): boolean {
   return sameWalletAddress(address, conversation.buyerId) || sameWalletAddress(address, conversation.sellerId);
 }
 
-export async function GET(
+async function handleGET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -44,7 +47,7 @@ export async function GET(
   }
 }
 
-export async function POST(
+async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -70,8 +73,23 @@ export async function POST(
       return NextResponse.json({ error: 'senderId does not match the authenticated wallet' }, { status: 403 });
     }
 
-    if (!content || typeof content !== 'string' || content.trim().length === 0) {
+    const sanitizedContent = typeof content === 'string' ? sanitizeChatText(content) : '';
+    if (!sanitizedContent) {
       return NextResponse.json({ error: 'Message content cannot be empty' }, { status: 400 });
+    }
+    if (impersonatesSystemNotice(sanitizedContent)) {
+      return NextResponse.json(
+        { error: 'Messages cannot start with a bracketed [SYSTEM-STYLE] tag; those are reserved for verified VEILIO notices.' },
+        { status: 400 }
+      );
+    }
+
+    const rate = await allowChatMessage(`conv:${id}`, session.address);
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: 'Too many messages. Please slow down.', retryAfter: rate.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(rate.retryAfterSeconds) } }
+      );
     }
 
     // Payment request cards can only be referenced for this conversation's own requests.
@@ -82,12 +100,15 @@ export async function POST(
       }
     }
 
-    const sanitizedContent = content.trim().slice(0, 4000);
+    // The "AI Agent" badge is only for the seller of a listing registered as an agent.
+    const service = getServiceById(conversation.serviceId);
+    const isAgentSeller =
+      service?.sellerType === 'agent' && sameWalletAddress(session.address, conversation.sellerId);
 
     const message = addServiceMessage({
       conversationId: id,
       senderId: session.address,
-      senderType: senderType === 'agent' ? 'agent' : 'human',
+      senderType: senderType === 'agent' && isAgentSeller ? 'agent' : 'human',
       content: sanitizedContent,
       paymentRequestId: paymentRequestId || undefined,
     });
@@ -98,3 +119,6 @@ export async function POST(
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const GET = withJsonStores(handleGET);
+export const POST = withJsonStores(handlePOST);

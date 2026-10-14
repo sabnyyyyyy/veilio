@@ -1,7 +1,6 @@
 import { agentPublicClient, readAgentAuction, agentAuctionAbi } from '@/lib/agent-sdk/server';
 import { VEIL_V3_CONTRACT_ADDRESS } from '@/lib/contract';
 import { resolveIpfsUri } from '@/lib/ipfs';
-import { MOCK_AUCTIONS } from '@/lib/mockAuctions';
 import { computeParticipantReputation } from '@/lib/reputation';
 import { formatEther } from 'viem';
 
@@ -48,9 +47,12 @@ export async function GET(request: Request) {
     const licenseFilter = url.searchParams.get('license')?.toLowerCase();
     const query = url.searchParams.get('query')?.toLowerCase();
 
-    const count = await agentPublicClient
-      .readContract({ address: VEIL_V3_CONTRACT_ADDRESS, abi: agentAuctionAbi, functionName: 'auctionCount' })
-      .catch(() => 0n);
+    // RPC failures surface as 502 instead of silently returning an empty catalog.
+    const count = await agentPublicClient.readContract({
+      address: VEIL_V3_CONTRACT_ADDRESS,
+      abi: agentAuctionAbi,
+      functionName: 'auctionCount',
+    });
 
     const rawCursor = url.searchParams.get('cursor');
     const cursor = rawCursor === null ? count : (/^\d+$/.test(rawCursor) ? BigInt(rawCursor) : -1n);
@@ -63,7 +65,7 @@ export async function GET(request: Request) {
     const onchainResults = await Promise.all(ids.map((id) => readAgentAuction(id)));
     const validAuctions = onchainResults.filter((a) => a !== null);
 
-    let assets: AgentAssetItem[] = await Promise.all(
+    const assets: AgentAssetItem[] = await Promise.all(
       validAuctions.map(async (item) => {
         let meta: Record<string, any> = {};
         if (item.metadataURI) {
@@ -88,11 +90,11 @@ export async function GET(request: Request) {
             type: assetDetails.licenseType || 'commercial_use',
             usage_rights: assetDetails.usageRights || 'Standard digital asset usage rights',
           },
-          format: assetDetails.format || (meta.dataset?.manifest?.format) || 'Parquet',
+          format: assetDetails.format || meta.dataset?.manifest?.format,
           file_size: assetDetails.fileSize || (meta.dataset?.size ? `${(meta.dataset.size / (1024 * 1024)).toFixed(2)} MB` : undefined),
-          region: assetDetails.region || 'Global',
-          language: assetDetails.language || 'English',
-          data_period: assetDetails.dataPeriod || '2024 - 2026',
+          region: assetDetails.region,
+          language: assetDetails.language,
+          data_period: assetDetails.dataPeriod,
           update_frequency: assetDetails.updateFrequency || 'one_time',
           agent_compatible: assetDetails.agentCompatible ?? true,
           seller: {
@@ -113,44 +115,6 @@ export async function GET(request: Request) {
       })
     );
 
-    // Fallback to rich mock catalog if on-chain has no auctions
-    if (assets.length === 0) {
-      assets = MOCK_AUCTIONS.map((m) => {
-        const rep = computeParticipantReputation(m.seller, { role: 'seller' });
-        return {
-          id: m.id,
-          title: m.itemName,
-          description: m.description,
-          category: m.metadata?.category || m.assetType || 'dataset',
-          license: {
-            type: m.metadata?.licenseType || 'commercial_use',
-            usage_rights: m.metadata?.usageRights || 'Commercial use permitted',
-          },
-          format: m.metadata?.format || 'Parquet',
-          file_size: m.metadata?.fileSize || '2.4 GB',
-          region: m.metadata?.region || 'Global',
-          language: m.metadata?.language || 'English',
-          data_period: m.metadata?.dataPeriod || '2024 - 2026',
-          update_frequency: m.metadata?.updateFrequency || 'one_time',
-          agent_compatible: m.metadata?.agentCompatible ?? true,
-          seller: {
-            address: m.seller,
-            delivery_rate_percent: rep.deliverySuccessRate,
-            verified: rep.verifiedStatus,
-            status_label: rep.statusLabel,
-          },
-          auction: {
-            auction_id: m.id,
-            state: m.status,
-            starting_price_bnb: m.startingPrice,
-            bidder_count: m.bidderCount,
-            commit_end_time: Math.floor(m.commitEndTime / 1000),
-            reveal_end_time: Math.floor(m.revealEndTime / 1000),
-          },
-        };
-      });
-    }
-
     // Apply query and category filters
     const filtered = assets.filter((asset) => {
       const matchCat = !categoryFilter || categoryFilter === 'all' || asset.category.toLowerCase() === categoryFilter;
@@ -168,7 +132,7 @@ export async function GET(request: Request) {
         pagination: {
           limit,
           nextCursor,
-          total: (count > 0n ? count : BigInt(MOCK_AUCTIONS.length)).toString(),
+          total: count.toString(),
         },
         chainId: 97,
         contractAddress: VEIL_V3_CONTRACT_ADDRESS,

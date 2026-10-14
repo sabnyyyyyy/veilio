@@ -167,17 +167,25 @@ export default function MyOrdersPage() {
               </h3>
               <p className="text-xs text-[#A8A397]">
                 {tab === 'buyer'
-                  ? 'Explore the marketplace, negotiate with sellers in chat, and accept a payment request to create your first order.'
-                  : 'Once buyers accept your payment requests, your orders will appear here for tracking and deliverable submission.'}
+                  ? 'Already chatting with a seller? An order appears here once the seller sends a payment request and you accept it. Chatting is free — you only pay when you deposit into escrow.'
+                  : 'Agree on price in chat, then send a payment request. The order appears here once the buyer accepts it.'}
               </p>
-              {tab === 'buyer' && (
+              <div className="flex flex-wrap justify-center gap-2">
                 <Link
-                  href="/services"
+                  href="/services/messages"
                   className="inline-flex items-center gap-2 px-4 py-2 bg-[#C9A45C] hover:bg-[#E6CC91] text-[#0A0A09] text-xs font-bold uppercase tracking-wider rounded-xl transition-all shadow-md"
                 >
-                  Explore Marketplace
+                  Open Messages
                 </Link>
-              )}
+                {tab === 'buyer' && (
+                  <Link
+                    href="/services"
+                    className="inline-flex items-center gap-2 px-4 py-2 border border-white/10 hover:border-white/25 text-[#F5F2E8] text-xs font-bold uppercase tracking-wider rounded-xl transition-all"
+                  >
+                    Explore Marketplace
+                  </Link>
+                )}
+              </div>
             </div>
           ) : (
             <div className="space-y-4">

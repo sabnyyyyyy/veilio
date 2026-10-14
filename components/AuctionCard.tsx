@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import Countdown from './Countdown';
-import { AuctionItem } from '@/lib/mockAuctions';
+import { AuctionItem } from '@/lib/auctionTypes';
 import { resolveIpfsUri } from '@/lib/ipfs';
 import {
   ArrowUpRight,

@@ -1,5 +1,7 @@
 import fs from 'fs';
 import path from 'path';
+import { getDataDir } from './dataDir';
+import { readJsonStore, writeJsonStore } from './jsonStore';
 import { DEFAULT_AUCTION_NETWORK, scopedAuctionKey, type AuctionNetworkId } from '../auctionNetwork';
 
 export interface RefundEvidence {
@@ -15,7 +17,7 @@ export interface RefundEvidence {
   networkId?: AuctionNetworkId;
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR = getDataDir();
 const DB_FILE = path.join(DATA_DIR, 'db', 'refunds.json');
 
 function ensureDirectories() {
@@ -24,6 +26,9 @@ function ensureDirectories() {
 }
 
 function readDb(): Record<string, RefundEvidence> {
+  const stored = readJsonStore<Record<string, RefundEvidence>>('refunds');
+  if (stored !== undefined) return stored || {};
+
   ensureDirectories();
   if (!fs.existsSync(DB_FILE)) return {};
   try {
@@ -36,6 +41,7 @@ function readDb(): Record<string, RefundEvidence> {
 }
 
 function writeDb(data: Record<string, RefundEvidence>) {
+  if (writeJsonStore('refunds', data)) return;
   ensureDirectories();
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
 }

@@ -2,7 +2,10 @@ import { isAddress, verifyMessage } from 'viem';
 import {
   createServiceAuthMessage,
   createServiceSessionMessage,
+  LEGACY_SERVICE_AUTH_PURPOSE,
   SERVICE_AUTH_HEADER,
+  SERVICE_SESSION_ACTION,
+  SERVICE_SESSION_SCOPE,
   SERVICE_SESSION_MAX_AGE_MS,
   type ServiceAuthPayload,
 } from '../serviceAuth';
@@ -179,15 +182,9 @@ export async function verifyServiceAuth(
   usedNonces.set(nonceKey, now + 10 * 60 * 1000);
 
   // 4. Server-side message reconstruction & cryptographic verification
-  const message = createServiceAuthMessage({
-    action,
-    orderId,
-    address,
-    timestamp: time,
-    nonce: nonce.trim(),
-  });
-
-  const sigResult = await verifyWalletSignature(address, isEvm, message, signature);
+  const messageInput = { action, orderId, address, timestamp: time, nonce: nonce.trim() };
+  const sigResult = await verifyCurrentOrLegacy(address, isEvm, signature, (purpose) =>
+    createServiceAuthMessage(messageInput, purpose));
   if (!sigResult.valid) {
     usedNonces.delete(nonceKey);
     return sigResult;
@@ -195,6 +192,22 @@ export async function verifyServiceAuth(
 
   // Verification succeeded - keep nonce in usedNonces for the full 10 minute TTL
   return { valid: true };
+}
+
+/**
+ * Verifies against the current message wording, then the legacy purpose line, so clients
+ * (SDK builds, open browser sessions) that signed the old text keep working.
+ */
+async function verifyCurrentOrLegacy(
+  address: string,
+  isEvm: boolean,
+  signature: string,
+  build: (purpose?: string) => string
+): Promise<VerifyServiceAuthResult> {
+  const current = await verifyWalletSignature(address, isEvm, build(), signature);
+  if (current.valid) return current;
+  const legacy = await verifyWalletSignature(address, isEvm, build(LEGACY_SERVICE_AUTH_PURPOSE), signature);
+  return legacy.valid ? legacy : current;
 }
 
 /**
@@ -318,8 +331,9 @@ export async function verifyServiceSessionAuth(
     return { valid: false, error: 'Wallet session expired. Please sign in again.', status: 401 };
   }
 
-  const message = createServiceSessionMessage({ address, timestamp: time, nonce: nonce.trim() });
-  const sigResult = await verifyWalletSignature(address, isEvm, message, signature);
+  const sessionInput = { action: SERVICE_SESSION_ACTION, orderId: SERVICE_SESSION_SCOPE, address, timestamp: time, nonce: nonce.trim() };
+  const sigResult = await verifyCurrentOrLegacy(address, isEvm, signature, (purpose) =>
+    purpose ? createServiceAuthMessage(sessionInput, purpose) : createServiceSessionMessage(sessionInput));
   if (!sigResult.valid) return sigResult;
 
   return { valid: true, address: isEvm ? address.toLowerCase() : address };

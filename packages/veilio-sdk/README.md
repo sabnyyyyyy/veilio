@@ -106,6 +106,8 @@ await (await services.releaseFunds(orderId)).wait(); // buyer; 5% fee on release
 
 // Fee-free exits: services.refund(orderId, reason), services.refundTimeout(orderId),
 // services.dispute(orderId, reason)
+// Seller agreed a lower price after funding: return the difference, the order keeps running
+// await services.partialRefund(orderId, '0.03', 'Agreed lower price')  // amount refunded, not the new price
 ```
 
 ### Keeping the VEILIO app in sync (off-chain API)
@@ -125,6 +127,7 @@ await api.submit({ orderId, deliveryTxHash: delivery.txHash, description: 'v1 de
 await api.requestRevision({ orderId, feedback: 'Please add the appendix' }); // buyer
 await api.approve({ orderId, releaseTxHash: release.txHash });            // buyer -> Completed
 await api.cancel({ orderId, reason: 'Mutual cancellation', txHash });     // funded orders need the refund tx
+await api.partialRefund({ orderId, txHash: partial.txHash });               // seller, after services.partialRefund
 ```
 
 No `network` field is sent: the server derives the chain from the order. `submit` requires the

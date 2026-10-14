@@ -13,6 +13,7 @@ import { isAddress } from 'viem';
 import { decodeBase58 } from '@/lib/cross-chain/solanaServiceRegistry';
 import { verifyServiceAuth } from '@/lib/server/serviceAuth';
 
+import { withJsonStores } from '@/lib/server/jsonStore';
 function isValidMultiChainAddress(addr: string): boolean {
   if (!addr || typeof addr !== 'string') return false;
   if (isAddress(addr)) return true;
@@ -32,7 +33,7 @@ function isValidMultiChainAddress(addr: string): boolean {
  * body. The network is stored as a canonical id ('bnb:97' | 'base:84532' |
  * 'solana:devnet') and fixes the currency and the escrow contract/program.
  */
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
@@ -157,3 +158,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const POST = withJsonStores(handlePOST);

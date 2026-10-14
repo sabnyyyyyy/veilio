@@ -1,6 +1,6 @@
 /**
  * Constructor arguments module for verifying VeilServiceEscrow on BscScan.
- * Contract Address: 0x794f1610B5588a55B19D8c82e4381448a388C965
+ * Contract Address: 0xEd83D9f97c01a94d235927704638d6e765501f50
  * Network: BNB Chain Testnet (Chain ID 97)
  */
 module.exports = [

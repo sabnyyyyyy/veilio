@@ -2,14 +2,34 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { usePublicClient } from 'wagmi';
+import { createPublicClient, http, fallback } from 'viem';
 import { Search, SlidersHorizontal, Bot, ArrowUpDown, X } from 'lucide-react';
 
 import AuctionGrid from '@/components/AuctionGrid';
 import { fetchOnchainAuctions } from '@/lib/onchainAuctions';
 import { fetchSolanaOnchainAuctions } from '@/lib/solanaAuctions';
-import { MOCK_AUCTIONS, type AuctionItem } from '@/lib/mockAuctions';
+import { type AuctionItem } from '@/lib/auctionTypes';
+import { bnbChain, baseSepoliaChain } from '@/lib/chain';
 
 export type AuctionNetworkKey = 'bnb:97' | 'base:84532' | 'solana:devnet';
+
+function getPublicClientForNetwork(network: AuctionNetworkKey, wagmiClient?: ReturnType<typeof usePublicClient>) {
+  if (wagmiClient) return wagmiClient;
+  const isBase = network === 'base:84532';
+  return createPublicClient({
+    chain: isBase ? baseSepoliaChain : bnbChain,
+    transport: isBase
+      ? fallback([
+          http(baseSepoliaChain.rpcUrls.default.http[0]),
+          http('https://sepolia.base.org'),
+        ])
+      : fallback([
+          http('https://bsc-testnet-rpc.publicnode.com'),
+          http(process.env.NEXT_PUBLIC_BNB_CHAIN_RPC || 'https://bsc-testnet-rpc.publicnode.com'),
+          http('https://data-seed-prebsc-2-s1.bnbchain.org:8545'),
+        ]),
+  });
+}
 
 export default function AuctionsPage() {
   const [selectedNetwork, setSelectedNetwork] = useState<AuctionNetworkKey>('bnb:97');
@@ -63,56 +83,37 @@ export default function AuctionsPage() {
         return;
       }
 
-      if (!publicClient) {
-        // Offline / Wallet not connected fallback to mock auctions with rich taxonomy
-        setAuctions(MOCK_AUCTIONS);
-        setTotalAuctions(String(MOCK_AUCTIONS.length));
-        setIsLoading(false);
-        return;
-      }
-
-      const client = publicClient;
+      const client = getPublicClientForNetwork(selectedNetwork, publicClient);
 
       try {
-        const page = await fetchOnchainAuctions(client, { limit: 20, chainId: selectedChainId });
-        if (page.auctions.length > 0) {
-          setAuctions(page.auctions);
-          setNextCursor(page.nextCursor);
-          setTotalAuctions(page.total);
-        } else if (selectedChainId === 97) {
-          // Fallback to sample digital-asset mock auctions so visitors see active categories on BNB
-          setAuctions(MOCK_AUCTIONS);
-          setTotalAuctions(String(MOCK_AUCTIONS.length));
-        } else {
-          setAuctions([]);
-          setNextCursor(null);
-          setTotalAuctions('0');
-        }
-      } catch (err) {
+        const page = await fetchOnchainAuctions(client as any, { limit: 20, chainId: selectedChainId });
+        setAuctions(page.auctions);
+        setNextCursor(page.nextCursor);
+        setTotalAuctions(page.total);
+      } catch (err: any) {
         console.error('Failed to load on-chain auctions:', err);
-        if (selectedChainId === 97) {
-          setAuctions(MOCK_AUCTIONS);
-          setTotalAuctions(String(MOCK_AUCTIONS.length));
-        } else {
-          setAuctions([]);
-          setNextCursor(null);
-          setTotalAuctions('0');
-          setError('Failed to load auctions from Base Sepolia. Verify RPC and contract deployment.');
-        }
+        setAuctions([]);
+        setNextCursor(null);
+        setTotalAuctions('0');
+        setError(
+          err?.message ||
+            `Failed to load on-chain auctions from ${isBase ? 'Base Sepolia' : 'BNB Chain Testnet'}. Verify RPC and contract deployment.`
+        );
       } finally {
         setIsLoading(false);
       }
     }
 
     loadAuctions();
-  }, [publicClient, selectedNetwork, selectedChainId, isSolana]);
+  }, [publicClient, selectedNetwork, selectedChainId, isSolana, isBase]);
 
   async function loadMore() {
-    if (!publicClient || !nextCursor || isLoadingMore) return;
+    if (!nextCursor || isLoadingMore) return;
     setIsLoadingMore(true);
     setPaginationError(null);
     try {
-      const page = await fetchOnchainAuctions(publicClient, { cursor: nextCursor, limit: 20, chainId: selectedChainId });
+      const client = getPublicClientForNetwork(selectedNetwork, publicClient);
+      const page = await fetchOnchainAuctions(client as any, { cursor: nextCursor, limit: 20, chainId: selectedChainId });
       setAuctions((current) => [...current, ...page.auctions]);
       setNextCursor(page.nextCursor);
     } catch (err) {

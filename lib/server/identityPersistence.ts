@@ -12,6 +12,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { getDataDir } from './dataDir';
 import crypto from 'crypto';
 import { isIdentityRedisConfigured, identityRedisCommand } from './redisRest';
 import type {
@@ -477,7 +478,7 @@ export class RedisIdentityStore implements IdentityPersistenceStore {
 // Development & Local Test Persistence Store
 // ============================================================================
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR = getDataDir();
 
 function getLocalDbFilePath(): string {
   // Isolate automated tests from user development database

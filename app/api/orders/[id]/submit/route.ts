@@ -15,12 +15,13 @@ import {
   servicesErrorStatus,
 } from '@/lib/server/serviceOrderNetwork';
 
+import { withJsonStores } from '@/lib/server/jsonStore';
 /**
  * Seller submits deliverables. Requires the on-chain submitDelivery / submit_delivery
  * transaction (`deliveryTxHash`) so the DB never shows "InReview" while the escrow is
  * still "Funded" on-chain (which would let the buyer claim a timeout refund).
  */
-export async function POST(
+async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -158,3 +159,5 @@ export async function POST(
     return NextResponse.json({ error: message }, { status: servicesErrorStatus(err) });
   }
 }
+
+export const POST = withJsonStores(handlePOST);

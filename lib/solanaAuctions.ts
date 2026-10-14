@@ -16,7 +16,7 @@ import {
   encodeBase58,
   getAnchorDiscriminator,
 } from './cross-chain/solanaServiceRegistry';
-import type { AuctionItem } from './mockAuctions';
+import type { AuctionItem } from './auctionTypes';
 
 export function getSolanaRpcEndpoints(): string[] {
   const endpoints: string[] = [];

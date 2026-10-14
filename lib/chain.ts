@@ -9,7 +9,14 @@ export const bnbChain = defineChain({
     decimals: 18,
   },
   rpcUrls: {
-    default: { http: [process.env.NEXT_PUBLIC_BNB_CHAIN_RPC || 'https://data-seed-prebsc-1-s1.bnbchain.org:8545'] },
+    default: {
+      http: [
+        process.env.NEXT_PUBLIC_BNB_CHAIN_RPC || 'https://bsc-testnet-rpc.publicnode.com',
+        'https://bsc-testnet-rpc.publicnode.com',
+        'https://data-seed-prebsc-2-s1.bnbchain.org:8545',
+        'https://data-seed-prebsc-1-s1.bnbchain.org:8545',
+      ],
+    },
   },
   blockExplorers: {
     default: { name: 'BscScan Testnet', url: 'https://testnet.bscscan.com' },

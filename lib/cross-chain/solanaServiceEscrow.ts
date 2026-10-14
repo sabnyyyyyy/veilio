@@ -430,6 +430,47 @@ export function createCancelOrRefundInstruction(params: {
 }
 
 /**
+ * Encodes the partial_refund instruction (seller returns part of the escrow, order stays active):
+ * accounts: [escrow_order (mut), vault (mut), seller (signer), buyer (mut), system_program]
+ * args: refund_amount u64, reason string
+ */
+export function createPartialRefundInstruction(params: {
+  programId?: string;
+  seller: string;
+  buyer: string;
+  orderId: string | Uint8Array;
+  refundLamports: bigint | number;
+  reason: string;
+}): SolanaCompiledInstruction {
+  const programId = params.programId || DEFAULT_SOLANA_SERVICE_ESCROW_PROGRAM_ID;
+  const orderIdBytes = normalizeBytes32(params.orderId);
+  const { pda: escrowOrderPda } = findEscrowOrderPda(orderIdBytes, programId);
+  const { pda: vaultPda } = findVaultPda(orderIdBytes, programId);
+
+  const amountBuf = Buffer.alloc(8);
+  amountBuf.writeBigUInt64LE(BigInt(params.refundLamports));
+  const reasonBuf = Buffer.from(params.reason.trim() || 'Price reduced', 'utf8');
+  const lenBuf = Buffer.alloc(4);
+  lenBuf.writeUInt32LE(reasonBuf.length);
+
+  const data = Buffer.concat([getAnchorDiscriminator('global', 'partial_refund'), amountBuf, lenBuf, reasonBuf]);
+  const keys = [
+    { pubkey: escrowOrderPda, isSigner: false, isWritable: true },
+    { pubkey: vaultPda, isSigner: false, isWritable: true },
+    { pubkey: params.seller, isSigner: true, isWritable: false },
+    { pubkey: params.buyer, isSigner: false, isWritable: true },
+    { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
+  ];
+
+  return {
+    programId,
+    accounts: keys,
+    keys,
+    data: Buffer.from(data),
+  };
+}
+
+/**
  * Encodes the dispute instruction:
  * accounts: [escrow_order (mut), caller (signer)]
  */

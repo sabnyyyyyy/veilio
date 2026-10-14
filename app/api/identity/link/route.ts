@@ -5,7 +5,8 @@ import {
   getIdentityProfile,
 } from '@/lib/server/identityDb';
 
-export async function POST(req: NextRequest) {
+import { withJsonStores } from '@/lib/server/jsonStore';
+async function handlePOST(req: NextRequest) {
   try {
     const body = await req.json();
     const { challengeId, walletAddress, signature } = body;
@@ -48,3 +49,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export const POST = withJsonStores(handlePOST);

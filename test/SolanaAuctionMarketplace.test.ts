@@ -23,7 +23,6 @@ import {
   encodeBase58,
 } from '../lib/cross-chain/solanaServiceRegistry';
 import { baseSepoliaChain, bnbChain } from '../lib/chain';
-import { MOCK_AUCTIONS } from '../lib/mockAuctions';
 
 describe('VEILIO — Solana Devnet Auctions Marketplace Integration', () => {
   const dummyProgramId = DEFAULT_SOLANA_AUCTION_PROGRAM_ID;
@@ -152,14 +151,6 @@ describe('VEILIO — Solana Devnet Auctions Marketplace Integration', () => {
       expect(bnbKey).to.not.equal(baseKey);
       expect(bnbKey).to.not.equal(solanaKey);
       expect(baseKey).to.not.equal(solanaKey);
-    });
-
-    it('verifies that selecting Solana does not contaminate with EVM mock auctions', () => {
-      // Mock auctions should only be for BNB (or EVM fallback)
-      expect(MOCK_AUCTIONS.length).to.be.greaterThan(0);
-      for (const mockItem of MOCK_AUCTIONS) {
-        expect(mockItem.networkId).to.not.equal('solana:devnet');
-      }
     });
   });
 

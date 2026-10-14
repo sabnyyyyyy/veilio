@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Bot, User, ShieldAlert, Sparkles, RefreshCw } from 'lucide-react';
 import type { TransactionMessage } from '@/lib/server/transactionDb';
+import { useServicesWalletAuth } from '@/components/services/useServicesWalletAuth';
+import ChatLinkWarning from '@/components/ChatLinkWarning';
 
 interface TransactionChatProps {
   transactionId: string;
@@ -21,17 +23,29 @@ export default function TransactionChat({
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { getSession, getSessionHeaders } = useServicesWalletAuth();
+  // Stop background polling after the user declines the sign-in prompt; Refresh retries.
+  const signInDeclined = useRef(false);
 
-  const fetchMessages = async () => {
+  const fetchMessages = async (manual = false) => {
+    if (!currentUserAddress || (signInDeclined.current && !manual)) return;
     try {
       setLoading(true);
-      const res = await fetch(`/api/transactions/${transactionId}/messages`);
+      const headers = await getSessionHeaders(currentUserAddress);
+      signInDeclined.current = false;
+      const res = await fetch(`/api/transactions/${transactionId}/messages`, { headers, cache: 'no-store' });
       const data = await res.json();
       if (data.success) {
         setMessages(data.messages || []);
+        setAccessError(null);
+      } else {
+        setAccessError(data.error || 'Unable to open this chat.');
       }
-    } catch (err) {
+    } catch (err: any) {
+      signInDeclined.current = true;
+      setAccessError('Sign the wallet message to open this chat (free, no transaction).');
       console.error('Failed to load transaction messages:', err);
     } finally {
       setLoading(false);
@@ -39,10 +53,11 @@ export default function TransactionChat({
   };
 
   useEffect(() => {
+    signInDeclined.current = false;
     fetchMessages();
-    const interval = setInterval(fetchMessages, 10000);
+    const interval = setInterval(() => fetchMessages(), 10000);
     return () => clearInterval(interval);
-  }, [transactionId]);
+  }, [transactionId, currentUserAddress]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -54,14 +69,13 @@ export default function TransactionChat({
 
     try {
       setSending(true);
-      const senderType = isBuyer ? 'buyer' : isSeller ? 'seller' : 'agent';
+      // The server derives the sender and role from the signed session and the auction contract.
       const res = await fetch(`/api/transactions/${transactionId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          senderAddress: currentUserAddress,
-          senderType,
           content: inputText.trim(),
+          auth: await getSession(currentUserAddress),
         }),
       });
 
@@ -89,10 +103,9 @@ export default function TransactionChat({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          senderAddress: currentUserAddress,
-          senderType: isBuyer ? 'buyer' : 'seller',
           content: promptText,
           messageType: 'text',
+          auth: await getSession(currentUserAddress),
         }),
       });
       const data = await res.json();
@@ -120,13 +133,13 @@ export default function TransactionChat({
           <div>
             <h4 className="text-sm font-bold text-[#F5F2E8]">Transaction Room #{transactionId}</h4>
             <p className="text-[11px] text-[#A8A397]">
-              Komunikasi terenkripsi antara Buyer, Seller, dan VEILIO AI Validator
+              Hanya Buyer &amp; Seller lelang ini (diverifikasi on-chain) · AI Validator memberi ringkasan
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={fetchMessages}
+            onClick={() => fetchMessages(true)}
             disabled={loading}
             className="p-1.5 text-[#A8A397] hover:text-[#F5F2E8] transition-colors rounded-lg hover:bg-white/5"
             title="Refresh messages"
@@ -145,6 +158,12 @@ export default function TransactionChat({
 
       {/* Message List */}
       <div className="flex-1 p-4 overflow-y-auto space-y-3">
+        {accessError && (
+          <div className="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+            <ShieldAlert className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+            <span>{accessError}</span>
+          </div>
+        )}
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-2 text-[#A8A397]">
             <Bot className="w-8 h-8 text-[#C9A45C]/50 mb-1" />
@@ -202,6 +221,7 @@ export default function TransactionChat({
                   </div>
                   <p className="text-xs leading-relaxed whitespace-pre-wrap">{m.content}</p>
                 </div>
+                {!isMe && !isAi && <div className="mt-1.5"><ChatLinkWarning text={m.content} lang="id" /></div>}
               </div>
             );
           })

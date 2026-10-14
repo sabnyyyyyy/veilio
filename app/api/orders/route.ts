@@ -3,7 +3,8 @@ import { getUserOrders } from '@/lib/server/servicesDb';
 import { isAddress } from 'viem';
 import { verifyServiceAuth, isSolanaAddress } from '@/lib/server/serviceAuth';
 
-export async function POST(req: NextRequest) {
+import { withJsonStores } from '@/lib/server/jsonStore';
+async function handlePOST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => null);
     const userAddress = body?.auth?.address;
@@ -33,3 +34,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const POST = withJsonStores(handlePOST);

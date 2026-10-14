@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUnifiedServicesForIdentity } from '@/lib/server/identityDb';
 
-export async function GET(req: NextRequest) {
+import { withJsonStores } from '@/lib/server/jsonStore';
+async function handleGET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const identityId = searchParams.get('identityId');
@@ -19,3 +20,5 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+
+export const GET = withJsonStores(handleGET);

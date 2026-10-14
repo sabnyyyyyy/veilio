@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import ServicesNav from '@/components/services/ServicesNav';
+import ChatLinkWarning from '@/components/ChatLinkWarning';
 import { useAccount } from 'wagmi';
 import { useServicesWalletAuth } from '@/components/services/useServicesWalletAuth';
 import {
@@ -19,6 +20,7 @@ import {
   FileCheck,
   ArrowRight,
   ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react';
 import type { Conversation, ServiceMessage, PaymentRequest } from '@/lib/server/servicesDb';
 import { saveServiceActivity } from '@/lib/walletStorage';
@@ -301,6 +303,38 @@ export function ServicesMessagesContent() {
   const isSeller = activeConv && address && activeConv.sellerId.toLowerCase() === address.toLowerCase();
   const isBuyer = activeConv && address && activeConv.buyerId.toLowerCase() === address.toLowerCase();
 
+  // Where this conversation is in chat -> offer -> accept -> escrow deposit, from its latest payment request.
+  const latestRequest = activeConv
+    ? Object.values(paymentRequestsMap)
+        .filter((pr) => pr.conversationId === activeConv.id && pr.status !== 'rejected' && pr.status !== 'expired')
+        .sort((a, b) => b.createdAt - a.createdAt)[0]
+    : undefined;
+  const dealStage: { tone: 'neutral' | 'action' | 'done'; title: string; detail: string } = (() => {
+    const price = latestRequest ? `${latestRequest.agreedPrice} ${latestRequest.currency}` : '';
+    switch (latestRequest?.status) {
+      case 'pending':
+        return isSeller
+          ? { tone: 'neutral', title: `Offer sent: ${price}`, detail: 'Waiting for the buyer to accept. Nothing is paid yet.' }
+          : { tone: 'action', title: `Offer received: ${price}`, detail: 'Review it below. Accepting is a free signature; you pay only when you deposit into escrow.' };
+      case 'accepted':
+        return isSeller
+          ? { tone: 'neutral', title: 'Offer accepted — awaiting escrow deposit', detail: "Don't start work until the buyer's deposit is confirmed." }
+          : { tone: 'action', title: `Deposit ${price} to start the order`, detail: 'Open the order in My Orders and confirm the escrow deposit in your wallet.' };
+      case 'funded':
+        return {
+          tone: 'done',
+          title: `Escrow funded: ${price}`,
+          detail: isSeller
+            ? 'Work can start. If you agree a lower price later, use "Lower price" on the order page.'
+            : 'Work can start. If the seller agrees a lower price later, the difference is refunded to you on-chain.',
+        };
+      default:
+        return isSeller
+          ? { tone: 'neutral', title: 'No offer yet', detail: 'Agree on price, scope and deadline, then click Request Payment to send an offer.' }
+          : { tone: 'neutral', title: 'No payment yet', detail: 'Chatting is free. The seller sends an offer with the agreed price; you only pay when you deposit it into escrow.' };
+    }
+  })();
+
   return (
     <div className="w-full pb-12 flex flex-col selection:bg-[#C9A45C]/30">
       <ServicesNav />
@@ -414,6 +448,28 @@ export function ServicesMessagesContent() {
                       )}
                     </div>
 
+                    {/* Deal stage */}
+                    <div className={`px-4 py-2.5 border-b flex items-start gap-2.5 text-[11px] ${
+                      dealStage.tone === 'action'
+                        ? 'border-[#C9A45C]/30 bg-[#C9A45C]/10'
+                        : dealStage.tone === 'done'
+                          ? 'border-emerald-500/20 bg-emerald-500/[0.06]'
+                          : 'border-white/5 bg-white/[0.02]'
+                    }`}>
+                      {dealStage.tone === 'done'
+                        ? <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0 text-emerald-400" />
+                        : <CreditCard className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${dealStage.tone === 'action' ? 'text-[#E6CC91]' : 'text-[#8E8A80]'}`} />}
+                      <div className="min-w-0 flex-1">
+                        <span className={`font-bold ${dealStage.tone === 'action' ? 'text-[#E6CC91]' : 'text-[#F5F2E8]'}`}>{dealStage.title}</span>
+                        <span className="text-[#A8A397]"> · {dealStage.detail}</span>
+                      </div>
+                      {isBuyer && latestRequest?.status === 'accepted' && (
+                        <Link href="/services/orders" className="shrink-0 font-bold uppercase tracking-wider text-[10px] text-[#E6CC91] hover:underline">
+                          My Orders →
+                        </Link>
+                      )}
+                    </div>
+
                     {/* Messages Body */}
                     <div className="flex-1 p-6 overflow-y-auto space-y-4">
                       {loadingMsgs ? (
@@ -432,6 +488,24 @@ export function ServicesMessagesContent() {
                         messages.map((m) => {
                           const isMe = address && m.senderId.toLowerCase() === address.toLowerCase();
                           const pr = m.paymentRequestId ? paymentRequestsMap[m.paymentRequestId] : null;
+
+                          // Server-written notices (escrow, disputes...) render apart from anything a user can type.
+                          if (m.system && !pr) {
+                            return (
+                              <div key={m.id} className="flex justify-center">
+                                <div className="max-w-md w-full rounded-xl border border-[#C9A45C]/25 bg-[#C9A45C]/[0.06] px-4 py-2.5 text-[11px] leading-relaxed text-[#D8D4C8]">
+                                  <div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#E6CC91]">
+                                    <ShieldCheck className="w-3 h-3" />
+                                    <span>Verified VEILIO notice</span>
+                                    <span className="font-normal normal-case tracking-normal text-[#8E8A80]">
+                                      · {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  </div>
+                                  {m.content}
+                                </div>
+                              </div>
+                            );
+                          }
 
                           return (
                             <div
@@ -545,6 +619,7 @@ export function ServicesMessagesContent() {
                                   {m.content}
                                 </div>
                               )}
+                              {!isMe && !pr && <ChatLinkWarning text={m.content} />}
                             </div>
                           );
                         })

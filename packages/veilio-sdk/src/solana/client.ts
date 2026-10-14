@@ -31,6 +31,7 @@ import {
 import {
   DEFAULT_SOLANA_SERVICE_ESCROW_PROGRAM_ID,
   createCancelOrRefundInstruction,
+  createPartialRefundInstruction,
   createDepositServiceOrderInstruction,
   createDisputeOrderInstruction,
   createReleaseFundsInstruction,
@@ -39,6 +40,7 @@ import {
   decodeEscrowOrderAccount,
   findEscrowConfigPda,
   findEscrowOrderPda,
+  parseSolToLamports,
   type DecodedSolanaEscrowConfig,
   type DecodedSolanaEscrowOrder,
 } from './escrow.js';
@@ -471,6 +473,25 @@ export function createVeilioSolanaClient(options: VeilioSolanaClientOptions) {
     );
   }
 
+  /**
+   * Seller: returns `amountSol` (e.g. "0.03") to the buyer after agreeing a lower price; the order
+   * stays active with the remaining escrow. Use `refund` to return everything.
+   */
+  async function partialRefund(orderId: string, amountSol: string, reason: string): Promise<string> {
+    const order = await getEscrowOrder(orderId);
+    if (!order) throw new VeilioSdkError({ code: 'NOT_FOUND', message: `Escrow order ${orderId} not found on Solana.` });
+    return send(
+      createPartialRefundInstruction({
+        programId: escrowProgramId,
+        seller: requireSigner().publicKey.toBase58(),
+        buyer: order.buyer,
+        orderId: toSolanaOrderId(orderId),
+        refundLamports: parseSolToLamports(amountSol),
+        reason,
+      })
+    );
+  }
+
   async function dispute(orderId: string, reason: string): Promise<string> {
     return send(
       createDisputeOrderInstruction({
@@ -503,6 +524,7 @@ export function createVeilioSolanaClient(options: VeilioSolanaClientOptions) {
     submitDelivery,
     releaseFunds,
     refund,
+    partialRefund,
     dispute,
   };
 }

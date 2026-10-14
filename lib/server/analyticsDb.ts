@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { getDataDir } from './dataDir';
 
 export interface AuctionViewStats {
   totalViews: number;
@@ -8,7 +9,7 @@ export interface AuctionViewStats {
   lastViewedAt: number | null;
 }
 
-const FILE = path.join(process.cwd(), 'data', 'db', 'auction-views.json');
+const FILE = path.join(getDataDir(), 'db', 'auction-views.json');
 
 function readDb(): Record<string, AuctionViewStats> {
   if (!fs.existsSync(FILE)) return {};

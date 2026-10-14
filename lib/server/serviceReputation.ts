@@ -1,6 +1,4 @@
-import { getOrderById } from './servicesDb';
-import fs from 'fs';
-import path from 'path';
+import { getOrderById, getOrdersBySeller } from './servicesDb';
 
 export interface VerifiableSellerReputation {
   sellerAddress: string;
@@ -16,9 +14,6 @@ export interface VerifiableSellerReputation {
   reputationNotes: string;
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const DB_FILE = path.join(DATA_DIR, 'db', 'services.json');
-
 /**
  * Calculates deterministic, verifiable reputation signals strictly from confirmed
  * order settlement and escrow records. Does NOT invent ratings, completed orders, or revenue.
@@ -26,16 +21,9 @@ const DB_FILE = path.join(DATA_DIR, 'db', 'services.json');
 export function calculateSellerReputation(sellerAddress: string): VerifiableSellerReputation {
   const normSeller = sellerAddress.toLowerCase().trim();
 
-  let orders: any[] = [];
+  let orders: ReturnType<typeof getOrdersBySeller> = [];
   try {
-    if (fs.existsSync(DB_FILE)) {
-      const data = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-      if (data?.orders) {
-        orders = Object.values(data.orders).filter(
-          (o: any) => o.sellerId && o.sellerId.toLowerCase() === normSeller
-        );
-      }
-    }
+    orders = getOrdersBySeller(normSeller);
   } catch (err) {
     console.error('Error loading orders for reputation calculation:', err);
   }

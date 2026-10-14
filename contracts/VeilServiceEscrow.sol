@@ -53,6 +53,10 @@ abstract contract ReentrancyGuard {
  *      order must then be re-funded under a fresh id. Clients should use unpredictable orderIds
  *      (e.g. random UUID / hash with salt) and verify `orders(orderId).buyer` after funding.
  *      Kept global (not buyer-namespaced) to stay ABI/storage-compatible with existing clients.
+ * 9. Price Reductions:
+ *    - `partialRefund` lets the seller return part of a Funded/Delivered order to the buyer (e.g. a
+ *      lower price agreed in chat) without cancelling it. Seller-only: lowering the price can only
+ *      benefit the buyer. The remaining `amount` stays escrowed and is what release/dispute settle.
  * 6. Access Control:
  *    - `owner`: Can update fee recipient, fee basis points (within cap), and reviewer.
  *    - `reviewer`: Third-party arbitrator who splits funds between buyer and seller in `resolveDispute`.
@@ -135,6 +139,13 @@ contract VeilServiceEscrow is ReentrancyGuard {
     event FeeConfigUpdated(address feeRecipient, uint256 feeBps);
     event ReviewerUpdated(address newReviewer);
     event DisputeTimedOut(bytes32 indexed orderId, address indexed buyer, uint256 refundAmount);
+    event OrderPartiallyRefunded(
+        bytes32 indexed orderId,
+        address indexed buyer,
+        uint256 refundAmount,
+        uint256 remainingAmount,
+        string reason
+    );
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner");
@@ -310,6 +321,29 @@ contract VeilServiceEscrow is ReentrancyGuard {
      */
     function cancelOrder(bytes32 orderId, string calldata reason) external nonReentrant {
         _refundInternal(orderId, reason);
+    }
+
+    /**
+     * @notice Seller returns part of the escrowed amount to the buyer, keeping the order active.
+     * @dev Use `refund`/`cancelOrder` to return everything; a partial refund must leave funds escrowed.
+     * @param orderId Order identifier.
+     * @param refundAmount Amount (wei) sent back to the buyer; must be > 0 and < current amount.
+     * @param reason Description, e.g. the renegotiated price.
+     */
+    function partialRefund(bytes32 orderId, uint256 refundAmount, string calldata reason) external nonReentrant {
+        EscrowOrder storage order = orders[orderId];
+        require(
+            order.status == EscrowStatus.Funded || order.status == EscrowStatus.Delivered,
+            "Order is not funded"
+        );
+        require(msg.sender == order.seller, "Only seller can partially refund");
+        require(refundAmount > 0, "Refund amount must be > 0");
+        require(refundAmount < order.amount, "Use refund for the full amount");
+
+        order.amount -= refundAmount;
+        _safeTransferOrStore(order.buyer, refundAmount);
+
+        emit OrderPartiallyRefunded(orderId, order.buyer, refundAmount, order.amount, reason);
     }
 
     /**

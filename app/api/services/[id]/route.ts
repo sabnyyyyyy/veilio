@@ -12,7 +12,8 @@ import { calculateSellerReputation } from '@/lib/server/serviceReputation';
 import { verifyServiceOnChain, computeListingMetadataHash } from '@/lib/server/serviceRegistryVerification';
 
 
-export async function GET(
+import { withJsonStores } from '@/lib/server/jsonStore';
+async function handleGET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -50,7 +51,7 @@ export async function GET(
   }
 }
 
-export async function PATCH(
+async function handlePATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -181,3 +182,6 @@ export async function PATCH(
     return NextResponse.json({ error: message }, { status });
   }
 }
+
+export const GET = withJsonStores(handleGET);
+export const PATCH = withJsonStores(handlePATCH);

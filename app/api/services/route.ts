@@ -21,7 +21,8 @@ import {
 import { calculateSellerReputation } from '@/lib/server/serviceReputation';
 import { verifyServiceOnChain } from '@/lib/server/serviceRegistryVerification';
 
-export async function GET(req: NextRequest) {
+import { withJsonStores } from '@/lib/server/jsonStore';
+async function handleGET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const query = searchParams.get('query') || undefined;
@@ -93,7 +94,7 @@ const MAX_CREATED_AT_AGE_MS = 6 * 60 * 60 * 1000;
  * createdAt verbatim so later verification recomputes the same hash.
  * EVM networks only (BNB 97 / Base 84532); Solana listings are not registered via this route.
  */
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
@@ -304,3 +305,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status });
   }
 }
+
+export const GET = withJsonStores(handleGET);
+export const POST = withJsonStores(handlePOST);

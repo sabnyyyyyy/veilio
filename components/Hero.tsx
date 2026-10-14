@@ -22,14 +22,6 @@ export default function Hero() {
 
       {/* Hero Content Container - Expanded Width */}
       <div className="relative z-10 w-full max-w-[1440px] mx-auto px-6 sm:px-10 lg:px-16 flex-1 flex flex-col justify-center items-center text-center my-auto">
-        {/* Eyebrow Pill Badge */}
-        <div className="mb-7 inline-flex items-center gap-2.5 rounded-full border border-white/15 bg-black/60 px-5 py-1.5 text-xs font-bold uppercase tracking-[0.22em] text-[#E2C17C] backdrop-blur-md shadow-[0_0_24px_rgba(226,193,124,0.18)]">
-          <span className="h-2 w-2 rounded-full bg-[#E2C17C] animate-pulse" />
-          <span>Human &amp; AI Economy</span>
-          <span className="text-white/40">/</span>
-          <span className="text-white/80 font-mono text-[11px]">SEALED PROTOCOL</span>
-        </div>
-
         {/* Display Headline - Expanded Max-Width & Fluid Scale */}
         <h1 className="relative z-10 w-full max-w-6xl text-balance text-center text-[clamp(2.4rem,6.2vw,5.2rem)] font-extrabold uppercase leading-[0.98] tracking-tight text-white drop-shadow-[0_4px_30px_rgba(0,0,0,0.95)]">
           <span className="block">The on-chain exchange</span>

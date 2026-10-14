@@ -2,7 +2,7 @@ import React from 'react';
 import Hero from '@/components/Hero';
 import SmokeBackground from '@/components/home/SmokeBackground';
 import WhatVeilDoes from '@/components/home/WhatVeilDoes';
-import PrivateByDesign from '@/components/home/PrivateByDesign';
+import TwoMarketplaces from '@/components/home/TwoMarketplaces';
 import OnChainSettlement from '@/components/home/OnChainSettlement';
 import FinalCTA from '@/components/home/FinalCTA';
 
@@ -13,7 +13,7 @@ export default function HomePage() {
       <SmokeBackground />
       <Hero />
       <WhatVeilDoes />
-      <PrivateByDesign />
+      <TwoMarketplaces />
       <OnChainSettlement />
       <FinalCTA />
     </div>

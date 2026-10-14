@@ -7,7 +7,7 @@ const { ethers } = hre;
 async function main() {
   const deploymentTxHash = "0x80b9cf6de14f1a0a556b99910e1abad0b53536447ef15dd8020c24a12e8f6e4c";
   const expectedContractAddress = "0x016A23A069180587d5D8B09413e97E1e78ccD702";
-  const expectedEscrowAddress = "0x794f1610B5588a55B19D8c82e4381448a388C965";
+  const expectedEscrowAddress = "0xEd83D9f97c01a94d235927704638d6e765501f50";
   const legacyAuctionContracts = [
     "0xE07bBaaF8524E9114C02cbbCb5F11041F3D4Be77",
     "0x2df959a785E489AF457410F7C81a6BDDc1E8D41B",

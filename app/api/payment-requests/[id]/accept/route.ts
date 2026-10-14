@@ -8,7 +8,8 @@ import { isAddress } from 'viem';
 import { verifyServiceAuth, isSolanaAddress } from '@/lib/server/serviceAuth';
 import { servicesErrorStatus } from '@/lib/server/serviceOrderNetwork';
 
-export async function POST(
+import { withJsonStores } from '@/lib/server/jsonStore';
+async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -82,3 +83,5 @@ export async function POST(
     return NextResponse.json({ error: message }, { status: servicesErrorStatus(err) });
   }
 }
+
+export const POST = withJsonStores(handlePOST);

@@ -17,7 +17,7 @@ export default function ServicesNav() {
   };
 
   return (
-    <div className="w-full border-b border-white/[0.08] bg-[#0C0C0A] sticky top-[72px] z-40 backdrop-blur-md">
+    <div className="w-full mt-[72px] border-b border-white/[0.08] bg-[#0A0A09]/85 sticky top-[72px] z-40 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-6 flex flex-wrap items-center justify-between gap-4 py-2.5">
         {/* Navigation Tabs */}
         <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto py-0.5 no-scrollbar">
@@ -25,7 +25,7 @@ export default function ServicesNav() {
             href="/services"
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium uppercase tracking-wider transition-all ${
               isTabActive('/services')
-                ? 'bg-white/[0.08] text-[#F5F2E8] border border-white/[0.14] shadow-sm font-semibold'
+                ? 'bg-[#C9A45C]/10 text-[#F5F2E8] border border-[#C9A45C]/35 shadow-sm font-semibold'
                 : 'text-[#8E8A80] hover:text-[#D4D0C5] hover:bg-white/[0.03] border border-transparent'
             }`}
           >
@@ -37,7 +37,7 @@ export default function ServicesNav() {
             href="/services/messages"
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium uppercase tracking-wider transition-all ${
               isTabActive('/services/messages')
-                ? 'bg-white/[0.08] text-[#F5F2E8] border border-white/[0.14] shadow-sm font-semibold'
+                ? 'bg-[#C9A45C]/10 text-[#F5F2E8] border border-[#C9A45C]/35 shadow-sm font-semibold'
                 : 'text-[#8E8A80] hover:text-[#D4D0C5] hover:bg-white/[0.03] border border-transparent'
             }`}
           >
@@ -49,7 +49,7 @@ export default function ServicesNav() {
             href="/services/orders"
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium uppercase tracking-wider transition-all ${
               isTabActive('/services/orders')
-                ? 'bg-white/[0.08] text-[#F5F2E8] border border-white/[0.14] shadow-sm font-semibold'
+                ? 'bg-[#C9A45C]/10 text-[#F5F2E8] border border-[#C9A45C]/35 shadow-sm font-semibold'
                 : 'text-[#8E8A80] hover:text-[#D4D0C5] hover:bg-white/[0.03] border border-transparent'
             }`}
           >
@@ -61,7 +61,7 @@ export default function ServicesNav() {
             href="/services/my-services"
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium uppercase tracking-wider transition-all ${
               isTabActive('/services/my-services')
-                ? 'bg-white/[0.08] text-[#F5F2E8] border border-white/[0.14] shadow-sm font-semibold'
+                ? 'bg-[#C9A45C]/10 text-[#F5F2E8] border border-[#C9A45C]/35 shadow-sm font-semibold'
                 : 'text-[#8E8A80] hover:text-[#D4D0C5] hover:bg-white/[0.03] border border-transparent'
             }`}
           >

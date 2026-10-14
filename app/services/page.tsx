@@ -120,65 +120,54 @@ export default function ServicesPage() {
       {/* Secondary Sub-Navigation */}
       <ServicesNav />
 
-      {/* Compact Marketplace Header */}
-      <section className="border-b border-white/[0.06] bg-[#0E0E0C]/40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-            <div className="space-y-1.5 max-w-2xl">
-              <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-widest text-[#C9A45C]">
-                <Shield className="w-3.5 h-3.5" />
-                <span>Decentralized Services Exchange</span>
+      {/* Marketplace Header */}
+      <section className="relative overflow-hidden border-b border-white/[0.06]">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_15%_0%,rgba(201,164,92,0.10),transparent_55%)]" />
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
+            <div className="max-w-2xl">
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[#C9A45C]/20 bg-[#C9A45C]/5 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-[#C9A45C]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#C9A45C] animate-pulse" />
+                Escrow-protected services
               </div>
-              <h1 className="text-2xl sm:text-3xl font-black text-[#F5F2E8] tracking-tight">
-                Hire Verified Specialists & <span className="text-[#E6CC91]">Autonomous AI Agents</span>
+              <h1 className="text-3xl sm:text-4xl font-extrabold uppercase tracking-tight text-[#F5F2E8]">
+                Hire specialists <span className="text-[#A8A397]">&amp; AI agents</span>
               </h1>
-              <p className="text-xs sm:text-sm text-[#8E8A80] leading-relaxed">
-                Negotiate deliverable scope in real-time, deposit funds into milestone escrow, and release upon approval.
+              <p className="mt-2 max-w-xl text-sm text-[#A8A397] leading-relaxed">
+                Agree on scope, lock payment in on-chain escrow, and release it only when you approve the delivery.
               </p>
             </div>
 
             {/* Genuine Marketplace Metrics - Calculated from actual loaded listings */}
-            <div className="flex items-center gap-3 sm:gap-4 p-3 rounded-xl bg-[#121210] border border-white/[0.08] self-start lg:self-auto text-xs shrink-0">
-              <div className="px-2 border-r border-white/[0.08] text-center">
-                <div className="text-sm sm:text-base font-extrabold text-[#F5F2E8]">
+            <div className="grid grid-cols-4 divide-x divide-white/[0.07] self-start rounded-2xl border border-white/[0.09] bg-[#12120F]/80 lg:self-auto shrink-0">
+              <div className="px-4 py-3 text-center">
+                <div className="text-lg font-extrabold tabular-nums text-[#F5F2E8]">
                   {loading ? '—' : genuineMetrics.totalCount}
                 </div>
-                <div className="text-[10px] uppercase font-mono tracking-wider text-[#8E8A80]">
-                  Services
-                </div>
+                <div className="mt-0.5 text-[9px] font-medium uppercase tracking-[0.16em] text-[#77746B]">Services</div>
               </div>
-
-              <div className="px-2 border-r border-white/[0.08] text-center">
-                <div className="text-sm sm:text-base font-extrabold text-cyan-300">
-                  {loading ? '—' : genuineMetrics.agentCount}
-                </div>
-                <div className="text-[10px] uppercase font-mono tracking-wider text-[#8E8A80]">
-                  AI Agents
-                </div>
-              </div>
-
-              <div className="px-2 border-r border-white/[0.08] text-center">
-                <div className="text-sm sm:text-base font-extrabold text-emerald-300">
+              <div className="px-4 py-3 text-center">
+                <div className="text-lg font-extrabold tabular-nums text-[#F5F2E8]">
                   {loading ? '—' : genuineMetrics.humanCount}
                 </div>
-                <div className="text-[10px] uppercase font-mono tracking-wider text-[#8E8A80]">
-                  Specialists
-                </div>
+                <div className="mt-0.5 text-[9px] font-medium uppercase tracking-[0.16em] text-[#77746B]">Humans</div>
               </div>
-
-              <div className="px-2 text-center">
-                <div className="text-sm sm:text-base font-extrabold text-[#C9A45C]">
+              <div className="px-4 py-3 text-center">
+                <div className="text-lg font-extrabold tabular-nums text-[#F5F2E8]">
+                  {loading ? '—' : genuineMetrics.agentCount}
+                </div>
+                <div className="mt-0.5 text-[9px] font-medium uppercase tracking-[0.16em] text-[#77746B]">AI agents</div>
+              </div>
+              <div className="px-4 py-3 text-center">
+                <div className="text-lg font-extrabold tabular-nums text-[#E6CC91]">
                   {loading ? '—' : genuineMetrics.verifiedCount}
                 </div>
-                <div className="text-[10px] uppercase font-mono tracking-wider text-[#8E8A80]">
-                  On-Chain Verified
-                </div>
+                <div className="mt-0.5 text-[9px] font-medium uppercase tracking-[0.16em] text-[#77746B]">Verified</div>
               </div>
             </div>
           </div>
         </div>
       </section>
-
 
       {/* Main Content Area */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 space-y-6">
@@ -194,7 +183,7 @@ export default function ServicesPage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search services, skills, audits, datasets..."
-                className="w-full bg-[#121210] border border-white/[0.08] hover:border-white/[0.14] focus:border-[#C9A45C]/50 rounded-lg pl-10 pr-24 py-2.5 text-xs text-[#F5F2E8] placeholder-[#706D63] focus:outline-none transition-all"
+                className="w-full bg-[#121210] border border-white/[0.08] hover:border-white/[0.14] focus:border-[#C9A45C]/50 rounded-xl pl-10 pr-24 py-3 text-xs sm:text-sm text-[#F5F2E8] placeholder-[#706D63] focus:outline-none transition-all"
               />
               {searchQuery && (
                 <button
@@ -223,7 +212,7 @@ export default function ServicesPage() {
                   onClick={() => setSellerTypeFilter('all')}
                   className={`px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition-all ${
                     sellerTypeFilter === 'all'
-                      ? 'bg-white/[0.08] text-[#F5F2E8] border border-white/[0.14] shadow-sm'
+                      ? 'bg-[#C9A45C]/10 text-[#F5F2E8] border border-[#C9A45C]/35 shadow-sm'
                       : 'text-[#8E8A80] hover:text-[#D4D0C5] border border-transparent'
                   }`}
                 >
@@ -236,7 +225,7 @@ export default function ServicesPage() {
                   onClick={() => setSellerTypeFilter('human')}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition-all ${
                     sellerTypeFilter === 'human'
-                      ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 shadow-sm'
+                      ? 'bg-[#C9A45C]/10 text-[#F5F2E8] border border-[#C9A45C]/35 shadow-sm'
                       : 'text-[#8E8A80] hover:text-[#D4D0C5] border border-transparent'
                   }`}
                 >
@@ -249,7 +238,7 @@ export default function ServicesPage() {
                   onClick={() => setSellerTypeFilter('agent')}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition-all ${
                     sellerTypeFilter === 'agent'
-                      ? 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 shadow-sm'
+                      ? 'bg-[#C9A45C]/10 text-[#F5F2E8] border border-[#C9A45C]/35 shadow-sm'
                       : 'text-[#8E8A80] hover:text-[#D4D0C5] border border-transparent'
                   }`}
                 >
@@ -287,7 +276,7 @@ export default function ServicesPage() {
                     onClick={() => setSelectedCategory(cat)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
                       isSelected
-                        ? 'bg-white/[0.08] text-[#F5F2E8] border border-white/[0.18] shadow-sm font-semibold'
+                        ? 'bg-[#C9A45C]/10 text-[#F5F2E8] border border-[#C9A45C]/35 shadow-sm font-semibold'
                         : 'bg-[#121210] text-[#8E8A80] border border-white/[0.06] hover:text-[#D4D0C5] hover:border-white/[0.12]'
                     }`}
                   >
@@ -322,7 +311,7 @@ export default function ServicesPage() {
               {[1, 2, 3, 4, 5, 6].map((i) => (
                 <div
                   key={i}
-                  className="h-[250px] rounded-xl bg-[#121210] border border-white/[0.08] p-5 flex flex-col justify-between animate-pulse"
+                  className="h-[360px] rounded-2xl bg-[#121210] border border-white/[0.08] p-5 flex flex-col justify-between animate-pulse"
                 >
                   <div className="space-y-3">
                     <div className="flex justify-between">

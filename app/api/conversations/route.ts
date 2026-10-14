@@ -8,6 +8,7 @@ import {
 import { isAddress } from 'viem';
 import { extractServiceAuth, isSolanaAddress, verifyServiceSessionAuth } from '@/lib/server/serviceAuth';
 
+import { withJsonStores } from '@/lib/server/jsonStore';
 /**
  * Both handlers require a signed services session (lib/serviceAuth.ts):
  *   GET  -> `x-veilio-auth` header; lists only the authenticated wallet's conversations.
@@ -18,7 +19,7 @@ function isWallet(addr: unknown): addr is string {
   return typeof addr === 'string' && (isAddress(addr) || isSolanaAddress(addr));
 }
 
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   try {
     const session = await verifyServiceSessionAuth(extractServiceAuth(req.headers));
     if (!session.valid || !session.address) {
@@ -40,7 +41,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     const body = await req.json();
     const { buyerAddress, serviceId, serviceTitle } = body;
@@ -78,3 +79,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const GET = withJsonStores(handleGET);
+export const POST = withJsonStores(handlePOST);

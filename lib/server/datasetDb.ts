@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { getDataDir } from './dataDir';
 import crypto from 'crypto';
 import { decryptDatabase, encryptDatabase, parseAssetMasterKey, type EncryptedDatabase } from './datasetVault';
 import { assetRedisCommand, isAssetRedisConfigured } from './redisRest';
@@ -60,7 +61,7 @@ interface DatasetDatabase {
   consumedUploadNonces: Record<string, number>;
 }
 
-const DATA_DIR = process.env.VEILIO_ASSET_STORAGE_DIR || path.join(process.cwd(), 'data');
+const DATA_DIR = process.env.VEILIO_ASSET_STORAGE_DIR || getDataDir();
 const ENCRYPTED_DIR = path.join(DATA_DIR, 'encrypted');
 const DB_FILE = path.join(DATA_DIR, 'db', 'datasets.json');
 const REDIS_RECORD_PREFIX = 'veilio:asset:record:';

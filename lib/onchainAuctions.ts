@@ -1,6 +1,7 @@
 import type { usePublicClient } from 'wagmi';
+import type { PublicClient } from 'viem';
 import { formatEther } from 'viem';
-import type { AuctionItem } from './mockAuctions';
+import type { AuctionItem } from './auctionTypes';
 import { getAuctionContractConfig } from './contract';
 import { resolveIpfsUri } from './ipfs';
 import { computeParticipantReputation } from './reputation';
@@ -56,7 +57,7 @@ interface AuctionMetadata {
 }
 
 export async function fetchOnchainAuctions(
-  publicClient: NonNullable<ReturnType<typeof usePublicClient>>,
+  publicClient: PublicClient | NonNullable<ReturnType<typeof usePublicClient>>,
   input: { cursor?: string | bigint | number; limit?: number; chainId?: number } = {},
 ): Promise<{ auctions: AuctionItem[]; nextCursor: string | null; total: string }> {
   const targetChainId = input.chainId ?? publicClient.chain?.id ?? 97;
@@ -124,12 +125,13 @@ export async function fetchOnchainAuctions(
           // resolveIpfsUri routes ipfs:// through proxy, /uploads/ and https:// pass through
           const metadataUrl = resolveIpfsUri(imageURI) || imageURI;
 
-          const response = await fetch(metadataUrl, { signal: AbortSignal.timeout(7000) });
+          const isJson = imageURI.endsWith('.json') || imageURI.includes('metadata');
+          const response = await fetch(metadataUrl, { signal: AbortSignal.timeout(isJson ? 4000 : 2500) });
 
           if (response.ok) {
             // Only try to parse as JSON if the content-type suggests it
             const ct = response.headers.get('content-type') || '';
-            if (ct.includes('json') || ct.includes('text') || imageURI.endsWith('.json')) {
+            if (ct.includes('json') || ct.includes('text') || isJson) {
               try {
                 const metadata = (await response.json()) as AuctionMetadata;
 

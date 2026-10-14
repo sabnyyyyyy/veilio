@@ -60,7 +60,7 @@ export const NETWORK_REGISTRY: Record<CanonicalNetworkId, NetworkConfig> = {
     explorerUrl: 'https://testnet.bscscan.com',
     contracts: {
       auction: BNB_TESTNET_AUCTION_ADDRESS,
-      serviceEscrow: process.env.NEXT_PUBLIC_SERVICE_ESCROW_CONTRACT_ADDRESS || '0x794f1610B5588a55B19D8c82e4381448a388C965',
+      serviceEscrow: process.env.NEXT_PUBLIC_SERVICE_ESCROW_CONTRACT_ADDRESS || '0xEd83D9f97c01a94d235927704638d6e765501f50',
       serviceRegistry: process.env.NEXT_PUBLIC_SERVICE_REGISTRY_CONTRACT_ADDRESS || '0x016A23A069180587d5D8B09413e97E1e78ccD702',
       nftCustody: BNB_TESTNET_AUCTION_ADDRESS,
     },
@@ -105,7 +105,7 @@ export const NETWORK_REGISTRY: Record<CanonicalNetworkId, NetworkConfig> = {
     explorerUrl: 'https://sepolia.basescan.org',
     contracts: {
       auction: process.env.NEXT_PUBLIC_BASE_SEPOLIA_AUCTION_ADDRESS || '0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1',
-      serviceEscrow: process.env.NEXT_PUBLIC_BASE_SEPOLIA_SERVICE_ESCROW_ADDRESS || '0x794f1610B5588a55B19D8c82e4381448a388C965',
+      serviceEscrow: process.env.NEXT_PUBLIC_BASE_SEPOLIA_SERVICE_ESCROW_ADDRESS || '0x9679f83560076921f364574Ff341c37B7fcFd9A4',
       serviceRegistry: process.env.NEXT_PUBLIC_BASE_SEPOLIA_SERVICE_REGISTRY_ADDRESS || '0x74a6Bf3ed462898F7b3E13e7F4d1c444570bCb88',
     },
     finalityConfig: {

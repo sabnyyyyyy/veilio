@@ -11,11 +11,12 @@ import { verifyServiceAuth, verifyServiceSessionAuth, extractServiceAuth } from 
 import { getSolanaServiceReviewer } from '@/lib/cross-chain/solanaServiceEscrow';
 import { resolveSolanaEscrowPlatformConfig } from '@/lib/server/solanaServiceVerification';
 
+import { withJsonStores } from '@/lib/server/jsonStore';
 /**
  * Order summary for a participant. Requires a signed services session
  * (`x-veilio-auth` header, see lib/serviceAuth.ts) from the buyer or seller.
  */
-export async function GET(
+async function handleGET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -57,7 +58,7 @@ export async function GET(
   }
 }
 
-export async function POST(
+async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -119,3 +120,6 @@ export async function POST(
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const GET = withJsonStores(handleGET);
+export const POST = withJsonStores(handlePOST);

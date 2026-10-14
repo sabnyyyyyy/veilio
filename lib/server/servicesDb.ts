@@ -1,5 +1,7 @@
 import fs from 'fs';
 import path from 'path';
+import { getDataDir } from './dataDir';
+import { readJsonStore, writeJsonStore } from './jsonStore';
 
 /**
  * Canonical network identifiers for Services listings, payment requests and orders.
@@ -98,6 +100,8 @@ export interface ServiceMessage {
   createdAt: number;
   readAt?: number;
   paymentRequestId?: string;
+  /** Written by the server (escrow events, disputes, ...). User-typed messages never have it. */
+  system?: boolean;
 }
 
 export interface PaymentRequest {
@@ -159,8 +163,20 @@ export interface ServiceOrder {
   escrowTxHash?: string;
   /** Settlement network, copied from the payment request when the order is created. */
   network?: ServiceNetworkId;
+  /** Price at funding time; set on the first seller price reduction (`priceSnapshot` then tracks the escrowed amount). */
+  originalPriceSnapshot?: string;
+  /** Seller partial refunds (renegotiated price), oldest first. */
+  priceReductions?: OrderPriceReduction[];
   createdAt: number;
   updatedAt: number;
+}
+
+export interface OrderPriceReduction {
+  refundAmount: string;
+  newPrice: string;
+  txHash: string;
+  reason?: string;
+  createdAt: number;
 }
 
 export interface OrderSubmission {
@@ -276,7 +292,7 @@ interface ServicesDatabase {
   orderDisputeMap: Record<string, string>;
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR = getDataDir();
 // VEILIO_SERVICES_DB_FILE lets tests (or a mounted volume) point at an isolated file.
 const DB_FILE = process.env.VEILIO_SERVICES_DB_FILE
   ? path.resolve(process.env.VEILIO_SERVICES_DB_FILE)
@@ -311,7 +327,31 @@ export const TEST_FIXTURE_SERVICES: ServiceListing[] = [
 ];
 
 
+function emptyServicesDb(): ServicesDatabase {
+  const initial: ServicesDatabase = {
+    services: {},
+    conversations: {},
+    messages: {},
+    paymentRequests: {},
+    orders: {},
+    submissions: {},
+    revisions: {},
+    disputes: {},
+    orderDisputeMap: {},
+  };
+  for (const s of INITIAL_SERVICES) {
+    initial.services[s.id] = s;
+  }
+  return initial;
+}
+
 function ensureDb(): ServicesDatabase {
+  // Production: the request's snapshot from Redis (lib/server/jsonStore.ts).
+  const stored = readJsonStore<Partial<ServicesDatabase>>('services');
+  if (stored !== undefined) {
+    return stored === null ? emptyServicesDb() : { ...emptyServicesDb(), ...stored };
+  }
+
   const dbDir = path.dirname(DB_FILE);
   if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
@@ -371,6 +411,8 @@ function ensureDb(): ServicesDatabase {
  * crash mid-write cannot leave a truncated JSON file behind.
  */
 function writeDb(data: ServicesDatabase): void {
+  if (writeJsonStore('services', data)) return;
+
   const dbDir = path.dirname(DB_FILE);
   try {
     if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
@@ -401,6 +443,8 @@ function appendServiceMessage(
   const id = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   const now = Date.now();
   const newMsg: ServiceMessage = {
+    // Notices posted by state-changing operations are system messages unless stated otherwise.
+    system: true,
     ...message,
     id,
     createdAt: now,
@@ -580,7 +624,8 @@ export function getConversationMessages(conversationId: string): ServiceMessage[
  */
 export function addServiceMessage(message: Omit<ServiceMessage, 'id' | 'createdAt'>): ServiceMessage {
   const db = ensureDb();
-  const newMsg = appendServiceMessage(db, message);
+  // Only the chat route posts through here: these are always user-typed messages.
+  const newMsg = appendServiceMessage(db, { ...message, system: false });
   writeDb(db);
   return newMsg;
 }
@@ -736,6 +781,12 @@ export function getOrderNetwork(order: ServiceOrder): ServiceNetworkId {
   return networkFromCurrency(order.currency);
 }
 
+/** All orders where `sellerAddress` is the provider (used for reputation). */
+export function getOrdersBySeller(sellerAddress: string): ServiceOrder[] {
+  const db = ensureDb();
+  return Object.values(db.orders).filter((o) => sameWalletAddress(o.sellerId, sellerAddress));
+}
+
 export function getUserOrders(userAddress: string): { asBuyer: ServiceOrder[]; asSeller: ServiceOrder[] } {
   const db = ensureDb();
   const all = Object.values(db.orders);
@@ -790,6 +841,46 @@ export function transitionOrderStatus(params: {
     const pr = db.paymentRequests[order.paymentRequestId];
     if (pr) pr.status = params.paymentRequestStatus;
   }
+
+  if (params.message) {
+    appendServiceMessage(db, { ...params.message, conversationId: order.conversationId });
+  }
+
+  writeDb(db);
+  return order;
+}
+
+/**
+ * Records a verified on-chain partial refund: `priceSnapshot` becomes the amount still escrowed.
+ * The order must still be funded and active, and each tx can only be applied once.
+ */
+export function applyOrderPriceReduction(params: {
+  orderId: string;
+  refundAmount: string;
+  newPrice: string;
+  txHash: string;
+  reason?: string;
+  message?: Omit<ServiceMessage, 'id' | 'createdAt' | 'conversationId'>;
+}): ServiceOrder {
+  const db = ensureDb();
+  const order = db.orders[params.orderId];
+  if (!order) throw new Error('Order not found');
+
+  if (!FUNDED_ACTIVE_ORDER_STATUSES.includes(order.status) || order.paymentStatus !== 'Funded') {
+    throw new OrderStateConflictError(`Price can only be reduced on a funded, active order (current: ${order.status})`);
+  }
+  const txHash = params.txHash.toLowerCase();
+  if ((order.priceReductions ?? []).some((r) => r.txHash.toLowerCase() === txHash)) {
+    throw new OrderStateConflictError('This partial refund transaction was already recorded');
+  }
+
+  order.originalPriceSnapshot ??= order.priceSnapshot;
+  order.priceSnapshot = params.newPrice;
+  order.priceReductions = [
+    ...(order.priceReductions ?? []),
+    { refundAmount: params.refundAmount, newPrice: params.newPrice, txHash: params.txHash, reason: params.reason, createdAt: Date.now() },
+  ];
+  order.updatedAt = Date.now();
 
   if (params.message) {
     appendServiceMessage(db, { ...params.message, conversationId: order.conversationId });

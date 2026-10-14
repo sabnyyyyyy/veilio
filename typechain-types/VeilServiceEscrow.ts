@@ -73,6 +73,7 @@ export interface VeilServiceEscrowInterface extends Interface {
       | "orderFeeBps"
       | "orders"
       | "owner"
+      | "partialRefund"
       | "pendingWithdrawals"
       | "platformFeeBasisPoints"
       | "refund"
@@ -94,6 +95,7 @@ export interface VeilServiceEscrowInterface extends Interface {
       | "FeeConfigUpdated"
       | "OrderDisputed"
       | "OrderFunded"
+      | "OrderPartiallyRefunded"
       | "OrderRefunded"
       | "OrderReleased"
       | "ReviewerUpdated"
@@ -136,6 +138,10 @@ export interface VeilServiceEscrowInterface extends Interface {
   ): string;
   encodeFunctionData(functionFragment: "orders", values: [BytesLike]): string;
   encodeFunctionData(functionFragment: "owner", values?: undefined): string;
+  encodeFunctionData(
+    functionFragment: "partialRefund",
+    values: [BytesLike, BigNumberish, string]
+  ): string;
   encodeFunctionData(
     functionFragment: "pendingWithdrawals",
     values: [AddressLike]
@@ -204,6 +210,10 @@ export interface VeilServiceEscrowInterface extends Interface {
   ): Result;
   decodeFunctionResult(functionFragment: "orders", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "owner", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "partialRefund",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(
     functionFragment: "pendingWithdrawals",
     data: BytesLike
@@ -362,6 +372,34 @@ export namespace OrderFundedEvent {
     seller: string;
     amount: bigint;
     deadline: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace OrderPartiallyRefundedEvent {
+  export type InputTuple = [
+    orderId: BytesLike,
+    buyer: AddressLike,
+    refundAmount: BigNumberish,
+    remainingAmount: BigNumberish,
+    reason: string
+  ];
+  export type OutputTuple = [
+    orderId: string,
+    buyer: string,
+    refundAmount: bigint,
+    remainingAmount: bigint,
+    reason: string
+  ];
+  export interface OutputObject {
+    orderId: string;
+    buyer: string;
+    refundAmount: bigint;
+    remainingAmount: bigint;
+    reason: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -567,6 +605,12 @@ export interface VeilServiceEscrow extends BaseContract {
 
   owner: TypedContractMethod<[], [string], "view">;
 
+  partialRefund: TypedContractMethod<
+    [orderId: BytesLike, refundAmount: BigNumberish, reason: string],
+    [void],
+    "nonpayable"
+  >;
+
   pendingWithdrawals: TypedContractMethod<
     [arg0: AddressLike],
     [bigint],
@@ -697,6 +741,13 @@ export interface VeilServiceEscrow extends BaseContract {
     nameOrSignature: "owner"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
+    nameOrSignature: "partialRefund"
+  ): TypedContractMethod<
+    [orderId: BytesLike, refundAmount: BigNumberish, reason: string],
+    [void],
+    "nonpayable"
+  >;
+  getFunction(
     nameOrSignature: "pendingWithdrawals"
   ): TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
   getFunction(
@@ -787,6 +838,13 @@ export interface VeilServiceEscrow extends BaseContract {
     OrderFundedEvent.InputTuple,
     OrderFundedEvent.OutputTuple,
     OrderFundedEvent.OutputObject
+  >;
+  getEvent(
+    key: "OrderPartiallyRefunded"
+  ): TypedContractEvent<
+    OrderPartiallyRefundedEvent.InputTuple,
+    OrderPartiallyRefundedEvent.OutputTuple,
+    OrderPartiallyRefundedEvent.OutputObject
   >;
   getEvent(
     key: "OrderRefunded"
@@ -889,6 +947,17 @@ export interface VeilServiceEscrow extends BaseContract {
       OrderFundedEvent.InputTuple,
       OrderFundedEvent.OutputTuple,
       OrderFundedEvent.OutputObject
+    >;
+
+    "OrderPartiallyRefunded(bytes32,address,uint256,uint256,string)": TypedContractEvent<
+      OrderPartiallyRefundedEvent.InputTuple,
+      OrderPartiallyRefundedEvent.OutputTuple,
+      OrderPartiallyRefundedEvent.OutputObject
+    >;
+    OrderPartiallyRefunded: TypedContractEvent<
+      OrderPartiallyRefundedEvent.InputTuple,
+      OrderPartiallyRefundedEvent.OutputTuple,
+      OrderPartiallyRefundedEvent.OutputObject
     >;
 
     "OrderRefunded(bytes32,address,uint256,string)": TypedContractEvent<

@@ -13,7 +13,8 @@ import { isAddress } from 'viem';
 import { verifyServiceAuth, isSolanaAddress } from '@/lib/server/serviceAuth';
 import { allowValidationRequest } from '@/lib/server/validationRateLimit';
 
-export async function POST(
+import { withJsonStores } from '@/lib/server/jsonStore';
+async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -91,3 +92,5 @@ export async function POST(
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const POST = withJsonStores(handlePOST);

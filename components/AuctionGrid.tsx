@@ -2,7 +2,7 @@
 
 import React from 'react';
 import AuctionCard from './AuctionCard';
-import { AuctionItem } from '@/lib/mockAuctions';
+import { AuctionItem } from '@/lib/auctionTypes';
 
 interface AuctionGridProps {
   auctions: AuctionItem[];

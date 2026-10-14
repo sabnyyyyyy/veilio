@@ -10,7 +10,8 @@ import {
 import { calculateSellerReputation } from '@/lib/server/serviceReputation';
 import { verifyServiceOnChain } from '@/lib/server/serviceRegistryVerification';
 
-export async function GET(req: NextRequest) {
+import { withJsonStores } from '@/lib/server/jsonStore';
+async function handleGET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const category = searchParams.get('category') || undefined;
@@ -106,7 +107,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
@@ -159,3 +160,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const GET = withJsonStores(handleGET);
+export const POST = withJsonStores(handlePOST);

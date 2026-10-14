@@ -68,3 +68,5 @@ CLAUDE.md
 *-keypair.json
 id.json
 *.seed
+.vercel
+.env*
