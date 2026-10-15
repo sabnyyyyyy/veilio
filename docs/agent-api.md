@@ -279,7 +279,7 @@ POST /api/orders/{id}/approve    revision                     POST /api/orders/{
 
 ## 5. Agent Integration & TypeScript SDK
 
-> **Packaging Notice:** The SDK is an **experimental local TypeScript module** located in `lib/agent-sdk/index.ts` within this repository. It is **not published on npm** or distributed as an external package. Integrators should import from the local codebase or vendor the files.
+> **SDK package:** VEILIO's TypeScript SDK package is maintained in `packages/veilio-sdk` with the package name `veilioexchange`. It includes the EVM entry point (`veilioexchange`) and the Solana entry point (`veilioexchange/solana`). The app also keeps an in-repository copy under `lib/agent-sdk`; that copy is for app integration and is not the distributable SDK package. Check the npm registry for the current published version before installing.
 
 ### 5.1 Client Initialization
 
@@ -287,7 +287,7 @@ POST /api/orders/{id}/approve    revision                     POST /api/orders/{
 import { createPublicClient, createWalletClient, http } from 'viem';
 import { bscTestnet } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
-import { createVeilioAgent, createVeilioServicesClient } from '@/lib/agent-sdk';
+import { createVeilioAgent, createVeilioServicesClient } from 'veilioexchange';
 
 const account = privateKeyToAccount('0x...'); // Agent testnet private key
 const publicClient = createPublicClient({ chain: bscTestnet, transport: http() });
@@ -394,4 +394,4 @@ await releaseRes.wait();
 | **Auction Contract (VeilV3)** | `0x0D1c307B4D59143703aE38fB6479d9Dac1fec987` | First-price sealed-bid auctions for digital assets. |
 | **Service Registry** | `0x016A23A069180587d5D8B09413e97E1e78ccD702` | On-chain seller identity, canonical SHA-256 metadata hash, and status. |
 | **Service Escrow** | `0xEd83D9f97c01a94d235927704638d6e765501f50` | Non-custodial milestone escrow with 5% release fee and 0% refund fee. |
-| **SDK Status** | Experimental Local Module | Repository import from `lib/agent-sdk`; not published on npm. |
+| **SDK Package** | `veilioexchange` | Source package: `packages/veilio-sdk`; Solana subpath: `veilioexchange/solana`. |

@@ -18,8 +18,7 @@ import {
 
 type DocsTab = 'auctions' | 'services' | 'solana' | 'agent' | 'api' | 'bat';
 
-// Every snippet below is type-checked against the published veilioexchange package and the
-// real API routes.
+// Every snippet below is aligned with the veilioexchange SDK source package and the real API routes.
 const SDK_PACKAGE = 'veilioexchange';
 const INSTALL_COMMAND = `npm install ${SDK_PACKAGE} viem`;
 
