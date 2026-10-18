@@ -29,6 +29,8 @@ import {
   formatServiceRegistryId,
 } from '@/lib/serviceRegistry';
 import { createServiceAuthMessage, generateAuthNonce } from '@/lib/serviceAuth';
+import { Connection, PublicKey, Transaction, TransactionInstruction } from '@solana/web3.js';
+import { createRegisterServiceInstruction, DEFAULT_SOLANA_SERVICE_REGISTRY_PROGRAM_ID, encodeBase58 } from '@/lib/cross-chain/solanaServiceRegistry';
 
 const CATEGORIES = [
   'AI Development',
@@ -56,6 +58,7 @@ export default function CreateServicePage() {
   const [sellerType, setSellerType] = useState<'human' | 'agent'>('human');
   const [sellerName, setSellerName] = useState('');
   const [sampleDeliverables, setSampleDeliverables] = useState<string[]>(['']);
+  const [listingNetwork, setListingNetwork] = useState<'bnb:97' | 'base:84532' | 'solana:devnet'>('bnb:97');
 
   // Transaction Lifecycle State
   const [txStage, setTxStage] = useState<'idle' | 'awaiting_signature' | 'awaiting_wallet' | 'mining' | 'verifying' | 'confirmed' | 'failed'>('idle');
@@ -63,13 +66,14 @@ export default function CreateServicePage() {
   const [createdServiceId, setCreatedServiceId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Listings can be registered on BNB Chain Testnet (97) or Base Sepolia (84532).
-  const isWrongChain = isConnected && chainId !== 97 && chainId !== 84532;
-  const listingChainId = chainId === 84532 ? 84532 : 97;
-  const listingNetwork = listingChainId === 84532 ? 'base:84532' : 'bnb:97';
-  const listingCurrency = listingChainId === 84532 ? 'ETH' : 'BNB';
-  const listingNetworkName = listingChainId === 84532 ? 'Base Sepolia' : 'BNB Chain Testnet';
-  const listingExplorer = listingChainId === 84532 ? 'https://sepolia.basescan.org' : 'https://testnet.bscscan.com';
+  const isSolana = listingNetwork === 'solana:devnet';
+  const listingChainId = listingNetwork === 'base:84532' ? 84532 : 97;
+  const resolvedNetwork = isSolana ? 'solana:devnet' : listingNetwork;
+  const listingCurrency = isSolana ? 'SOL' : listingChainId === 84532 ? 'ETH' : 'BNB';
+  const listingNetworkName = isSolana ? 'Solana Devnet' : listingChainId === 84532 ? 'Base Sepolia' : 'BNB Chain Testnet';
+  const listingExplorer = isSolana ? 'https://explorer.solana.com' : listingChainId === 84532 ? 'https://sepolia.basescan.org' : 'https://testnet.bscscan.com';
+  const isWrongChain = !isSolana && isConnected && chainId !== listingChainId;
+  const solanaProvider = typeof window !== 'undefined' ? (window as any).phantom?.solana || (window as any).solana : undefined;
 
   const addDeliverableField = () => {
     setSampleDeliverables([...sampleDeliverables, '']);
@@ -89,13 +93,18 @@ export default function CreateServicePage() {
     e.preventDefault();
     setErrorMessage(null);
 
-    if (!isConnected || !address) {
-      setErrorMessage('Please connect your Web3 wallet first to publish a service.');
+    let sellerAddress = isSolana ? solanaProvider?.publicKey?.toString() : address;
+    if (isSolana && !sellerAddress && solanaProvider?.connect) {
+      const connected = await solanaProvider.connect();
+      sellerAddress = connected.publicKey?.toString() || solanaProvider.publicKey?.toString();
+    }
+    if (!sellerAddress || (!isSolana && !isConnected)) {
+      setErrorMessage(`Connect your ${isSolana ? 'Phantom' : 'EVM'} wallet first to publish a service.`);
       return;
     }
 
     if (isWrongChain) {
-      setErrorMessage('Please switch your wallet network to BNB Chain Testnet (97) or Base Sepolia (84532) before registering.');
+      setErrorMessage(`Switch your wallet to ${listingNetworkName} before registering.`);
       return;
     }
 
@@ -128,7 +137,7 @@ export default function CreateServicePage() {
       // 1. Build canonical metadata and compute SHA-256 hash
       const canonicalMeta = buildCanonicalMetadata({
         id: generatedId,
-        seller: address,
+        seller: sellerAddress,
         sellerType,
         sellerName: resolvedSellerName,
         title: title.trim(),
@@ -144,36 +153,58 @@ export default function CreateServicePage() {
       const metadataHash = hashCanonicalMetadata(canonicalMeta);
       const metadataURI = `ipfs://QmServiceMeta-${generatedId}`;
 
-      // 2. Authorize via EIP-191 wallet signature
+      // 2. Authorize with the selected wallet (EIP-191 or Solana Ed25519).
       const authTimestamp = Date.now();
       const authNonce = generateAuthNonce();
       const authMessage = createServiceAuthMessage({
         action: 'create-service',
         orderId: generatedId,
-        address,
+        address: sellerAddress,
         timestamp: authTimestamp,
         nonce: authNonce,
       });
 
-      const signature = await signMessageAsync({ message: authMessage });
+      let signature: string;
+      if (isSolana) {
+        if (!solanaProvider?.signMessage || !solanaProvider?.signTransaction) throw new Error('Install Phantom or a compatible Solana wallet with signMessage and signTransaction support.');
+        await solanaProvider.connect();
+        const signedMessage = await solanaProvider.signMessage(new TextEncoder().encode(authMessage), 'utf8');
+        signature = encodeBase58(signedMessage.signature);
+      } else {
+        signature = await signMessageAsync({ message: authMessage });
+      }
 
       // 3. Prompt On-Chain Transaction in Wallet
       setTxStage('awaiting_wallet');
       const serviceIdBytes32 = formatServiceRegistryId(generatedId);
 
-      const onChainTxHash = await writeContractAsync({
-        address: getServiceRegistryAddress(listingChainId),
-        abi: VEIL_SERVICE_REGISTRY_ABI,
-        functionName: 'registerService',
-        args: [serviceIdBytes32, metadataHash, metadataURI],
-      });
+      let onChainTxHash: string;
+      if (isSolana) {
+        const seller = new PublicKey(sellerAddress);
+        const programId = new PublicKey(process.env.NEXT_PUBLIC_SOLANA_SERVICE_REGISTRY_PROGRAM_ID || DEFAULT_SOLANA_SERVICE_REGISTRY_PROGRAM_ID);
+        const ix = createRegisterServiceInstruction({ programId: programId.toBase58(), seller: seller.toBase58(), serviceId: serviceIdBytes32, metadataHash, metadataUri: metadataURI });
+        const connection = new Connection(process.env.NEXT_PUBLIC_SOLANA_RPC || 'https://api.devnet.solana.com', 'confirmed');
+        const latestBlockhash = await connection.getLatestBlockhash('confirmed');
+        const transaction = new Transaction({ feePayer: seller, ...latestBlockhash }).add(new TransactionInstruction({
+          programId, keys: ix.accounts.map((account) => ({ pubkey: new PublicKey(account.pubkey), isSigner: account.isSigner, isWritable: account.isWritable })), data: Buffer.from(ix.data),
+        }));
+        const signedTx = await solanaProvider.signTransaction(transaction) as Transaction;
+        onChainTxHash = await connection.sendRawTransaction(signedTx.serialize(), { preflightCommitment: 'confirmed' });
+        const confirmation = await connection.confirmTransaction({ signature: onChainTxHash, ...latestBlockhash }, 'confirmed');
+        if (confirmation.value.err) throw new Error('Solana service registry transaction failed on Devnet.');
+      } else {
+        onChainTxHash = await writeContractAsync({
+          address: getServiceRegistryAddress(listingChainId), abi: VEIL_SERVICE_REGISTRY_ABI,
+          functionName: 'registerService', args: [serviceIdBytes32, metadataHash, metadataURI],
+        });
+      }
 
       setTxHash(onChainTxHash);
       setTxStage('mining');
 
       // 4. Wait for on-chain block confirmation
-      if (publicClient) {
-        const receipt = await publicClient.waitForTransactionReceipt({ hash: onChainTxHash });
+      if (publicClient && !isSolana) {
+        const receipt = await publicClient.waitForTransactionReceipt({ hash: onChainTxHash as `0x${string}` });
         if (receipt.status !== 'success') {
           throw new Error('On-chain service registration transaction failed or reverted.');
         }
@@ -186,7 +217,7 @@ export default function CreateServicePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: generatedId,
-          sellerId: address,
+          sellerId: sellerAddress,
           sellerType,
           sellerName: resolvedSellerName,
           title: title.trim(),
@@ -194,7 +225,7 @@ export default function CreateServicePage() {
           category,
           price: String(Number(price)),
           currency: listingCurrency,
-          network: listingNetwork,
+          network: resolvedNetwork,
           createdAt,
           deliveryTime: deliveryTime.trim(),
           sampleDeliverables: filteredDeliverables,
@@ -202,7 +233,7 @@ export default function CreateServicePage() {
           metadataHash,
           metadataURI,
           auth: {
-            address,
+            address: sellerAddress,
             signature,
             timestamp: authTimestamp,
             nonce: authNonce,
@@ -248,11 +279,11 @@ export default function CreateServicePage() {
             <div className="flex items-center gap-2.5 text-xs">
               <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
               <span>
-                Your wallet is connected to Chain ID {chainId}. Please switch to <strong>BNB Chain Testnet (97)</strong> or <strong>Base Sepolia (84532)</strong> to register services.
+                Your wallet is connected to Chain ID {chainId}. Switch to <strong>{listingNetworkName} ({listingChainId})</strong> to register this service.
               </span>
             </div>
             <button
-              onClick={() => switchChain && switchChain({ chainId: 97 })}
+              onClick={() => switchChain && switchChain({ chainId: listingChainId })}
               className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/30 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors shrink-0"
             >
               Switch Network
@@ -300,7 +331,7 @@ export default function CreateServicePage() {
               <div className="pt-1 flex items-center gap-2">
                 <span className="text-[10px] text-[#A8A397]">Transaction Hash:</span>
                 <a
-                  href={`${listingExplorer}/tx/${txHash}`}
+                  href={isSolana ? `${listingExplorer}/tx/${txHash}?cluster=devnet` : `${listingExplorer}/tx/${txHash}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[#C9A45C] hover:underline font-mono text-[11px] inline-flex items-center gap-1"
@@ -326,6 +357,14 @@ export default function CreateServicePage() {
 
         <div className="p-8 rounded-2xl bg-[#151512] border border-white/5 space-y-8">
           <div className="space-y-2">
+            <label className="text-[10px] uppercase tracking-widest text-[#A8A397] font-bold block">Settlement network</label>
+            <select value={listingNetwork} onChange={(event) => setListingNetwork(event.target.value as typeof listingNetwork)} className="w-full bg-[#0A0A09] border border-white/10 rounded-xl px-4 py-3 text-sm text-[#F5F2E8]">
+              <option value="bnb:97">BNB Chain Testnet · BNB</option>
+              <option value="base:84532">Base Sepolia · ETH</option>
+              <option value="solana:devnet">Solana Devnet · SOL</option>
+            </select>
+          </div>
+          <div className="space-y-2">
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#C9A45C]/10 text-[#C9A45C] border border-[#C9A45C]/20 rounded-full text-xs font-bold uppercase tracking-wider">
               <Sparkles className="w-3.5 h-3.5" />
               <span>On-Chain Verified Service Listing</span>
@@ -349,7 +388,7 @@ export default function CreateServicePage() {
                   Seller Blockchain Identity
                 </span>
                 <span className="text-xs font-mono text-[#F5F2E8]">
-                  {address ? `${address.slice(0, 10)}...${address.slice(-8)}` : 'Connect Wallet'}
+                  {(isSolana ? solanaProvider?.publicKey?.toString() : address) ? `${(isSolana ? solanaProvider?.publicKey?.toString() : address).slice(0, 10)}...${(isSolana ? solanaProvider?.publicKey?.toString() : address).slice(-8)}` : 'Connect Wallet'}
                 </span>
               </div>
             </div>

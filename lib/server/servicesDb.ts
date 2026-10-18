@@ -171,6 +171,43 @@ export interface ServiceOrder {
   updatedAt: number;
 }
 
+export interface TrustPassportApproval {
+  address: string;
+  signature: string;
+  signedAt: number;
+  nonce: string;
+}
+
+export interface TrustPassportRecord {
+  orderId: string;
+  proofHash: string;
+  snapshot: {
+    schema: 'veilio-trust-passport-v1';
+    orderId: string;
+    serviceId: string;
+    serviceTitle: string;
+    buyer: string;
+    seller: string;
+    network: ServiceNetworkId;
+    completion: 'completed';
+    payment: 'released';
+    settlementReference: string;
+    evidenceHash: string;
+    dispute: 'none' | 'resolved' | 'cancelled';
+    disputeOutcome?: string;
+    recordedAt: number;
+  };
+  buyerApproval?: TrustPassportApproval;
+  sellerApproval?: TrustPassportApproval;
+  anchor?: {
+    network: ServiceNetworkId;
+    transaction: string;
+    anchoredAt: number;
+  };
+}
+
+export type TrustPassportAnchor = NonNullable<TrustPassportRecord['anchor']>;
+
 export interface OrderPriceReduction {
   refundAmount: string;
   newPrice: string;
@@ -185,7 +222,21 @@ export interface OrderSubmission {
   submittedBy: string;
   description: string;
   deliverableReferences: string[];
+  evidenceFiles?: Array<{ id: string; fileName: string; sha256: string }>;
   submittedAt: number;
+}
+
+export interface ServiceEvidenceFile {
+  id: string;
+  orderId: string;
+  uploadedBy: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  sha256: string;
+  storage: 'blob' | 'local';
+  storagePath: string;
+  uploadedAt: number;
 }
 
 export interface OrderRevision {
@@ -290,6 +341,8 @@ interface ServicesDatabase {
   revisions: Record<string, OrderRevision[]>;
   disputes: Record<string, ServiceDispute>;
   orderDisputeMap: Record<string, string>;
+  trustPassport: Record<string, TrustPassportRecord>;
+  serviceEvidence: Record<string, ServiceEvidenceFile>;
 }
 
 const DATA_DIR = getDataDir();
@@ -338,6 +391,8 @@ function emptyServicesDb(): ServicesDatabase {
     revisions: {},
     disputes: {},
     orderDisputeMap: {},
+    trustPassport: {},
+    serviceEvidence: {},
   };
   for (const s of INITIAL_SERVICES) {
     initial.services[s.id] = s;
@@ -366,6 +421,8 @@ function ensureDb(): ServicesDatabase {
       revisions: {},
       disputes: {},
       orderDisputeMap: {},
+      trustPassport: {},
+      serviceEvidence: {},
     };
     for (const s of INITIAL_SERVICES) {
       initial.services[s.id] = s;
@@ -387,6 +444,8 @@ function ensureDb(): ServicesDatabase {
       revisions: parsed.revisions || {},
       disputes: parsed.disputes || {},
       orderDisputeMap: parsed.orderDisputeMap || {},
+      trustPassport: parsed.trustPassport || {},
+      serviceEvidence: parsed.serviceEvidence || {},
     };
   } catch (err) {
     console.error('[Services DB] Failed to parse db file, reinitializing', err);
@@ -400,8 +459,25 @@ function ensureDb(): ServicesDatabase {
       revisions: {},
       disputes: {},
       orderDisputeMap: {},
+      trustPassport: {},
+      serviceEvidence: {},
     };
   }
+}
+
+export function saveServiceEvidenceFile(file: ServiceEvidenceFile): void {
+  const db = ensureDb();
+  if (!db.orders[file.orderId]) throw new Error('Order not found for evidence attachment.');
+  db.serviceEvidence[file.id] = file;
+  writeDb(db);
+}
+
+export function getServiceEvidenceFile(id: string): ServiceEvidenceFile | null {
+  return ensureDb().serviceEvidence[id] || null;
+}
+
+export function getServiceEvidenceFiles(orderId: string): ServiceEvidenceFile[] {
+  return Object.values(ensureDb().serviceEvidence).filter((file) => file.orderId === orderId).sort((a, b) => a.uploadedAt - b.uploadedAt);
 }
 
 /**
@@ -794,6 +870,50 @@ export function getUserOrders(userAddress: string): { asBuyer: ServiceOrder[]; a
     asBuyer: all.filter((o) => sameWalletAddress(o.buyerId, userAddress)).sort((a, b) => b.createdAt - a.createdAt),
     asSeller: all.filter((o) => sameWalletAddress(o.sellerId, userAddress)).sort((a, b) => b.createdAt - a.createdAt),
   };
+}
+
+/** Returns signed trust-passport records for one vendor wallet (public profile data). */
+export function getTrustPassportRecords(sellerAddress: string): TrustPassportRecord[] {
+  const db = ensureDb();
+  return Object.values(db.trustPassport)
+    .filter((record) => sameWalletAddress(record.snapshot.seller, sellerAddress) && record.buyerApproval && record.sellerApproval)
+    .sort((a, b) => b.snapshot.recordedAt - a.snapshot.recordedAt);
+}
+
+export function getTrustPassportRecordByOrder(orderId: string): TrustPassportRecord | null {
+  return ensureDb().trustPassport[orderId] || null;
+}
+
+/** Stores a participant's approval of one immutable, server-derived outcome snapshot. */
+export function saveTrustPassportApproval(
+  record: TrustPassportRecord,
+  role: 'buyer' | 'seller',
+  approval: TrustPassportApproval,
+): TrustPassportRecord {
+  const db = ensureDb();
+  const current = db.trustPassport[record.orderId];
+  if (current && current.proofHash !== record.proofHash) throw new OrderStateConflictError('Passport proof changed; request a fresh signature.');
+  const next: TrustPassportRecord = current || record;
+  next[role === 'buyer' ? 'buyerApproval' : 'sellerApproval'] = approval;
+  db.trustPassport[record.orderId] = next;
+  writeDb(db);
+  return next;
+}
+
+/** Attaches the verified public-chain transaction to a mutually approved record. */
+export function saveTrustPassportAnchor(orderId: string, proofHash: string, anchor: TrustPassportAnchor): TrustPassportRecord {
+  const db = ensureDb();
+  const current = db.trustPassport[orderId];
+  if (!current || current.proofHash !== proofHash || !current.buyerApproval || !current.sellerApproval) {
+    throw new OrderStateConflictError('Both participants must approve the same passport proof before it can be anchored.');
+  }
+  if (current.anchor && (current.anchor.transaction !== anchor?.transaction || current.anchor.network !== anchor.network)) {
+    throw new OrderStateConflictError('This passport proof is already anchored on-chain.');
+  }
+  current.anchor = anchor;
+  db.trustPassport[orderId] = current;
+  writeDb(db);
+  return current;
 }
 
 /** Statuses in which escrow funds are locked on-chain and not under dispute. */

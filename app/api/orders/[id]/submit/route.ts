@@ -3,6 +3,7 @@ import {
   getOrderById,
   addOrderSubmission,
   sameWalletAddress,
+  getServiceEvidenceFile,
 } from '@/lib/server/servicesDb';
 import { isAddress, parseEventLogs } from 'viem';
 import { verifyServiceAuth, isSolanaAddress } from '@/lib/server/serviceAuth';
@@ -145,6 +146,14 @@ async function handlePOST(
     const refs = Array.isArray(deliverableReferences)
       ? deliverableReferences.filter((r: unknown): r is string => typeof r === 'string').map((r: string) => r.slice(0, 500))
       : [];
+
+    for (const ref of refs.filter((value) => value.startsWith('evidence:'))) {
+      const match = /^evidence:([0-9a-f-]{36}):([0-9a-f]{64})$/i.exec(ref);
+      const evidence = match ? getServiceEvidenceFile(match[1]) : null;
+      if (!evidence || evidence.orderId !== id || !sameWalletAddress(evidence.uploadedBy, order.sellerId) || evidence.sha256 !== match?.[2].toLowerCase()) {
+        return NextResponse.json({ error: 'Evidence reference is invalid or was not uploaded for this order.' }, { status: 400 });
+      }
+    }
 
     const submission = addOrderSubmission(
       id,

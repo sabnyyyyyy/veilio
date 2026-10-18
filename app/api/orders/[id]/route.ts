@@ -6,6 +6,8 @@ import {
   getDisputeByOrderId,
   getOrderNetwork,
   sameWalletAddress,
+  getServiceEvidenceFile,
+  getServiceEvidenceFiles,
 } from '@/lib/server/servicesDb';
 import { verifyServiceAuth, verifyServiceSessionAuth, extractServiceAuth } from '@/lib/server/serviceAuth';
 import { getSolanaServiceReviewer } from '@/lib/cross-chain/solanaServiceEscrow';
@@ -104,7 +106,21 @@ async function handlePOST(
       );
     }
 
-    const submissions = getOrderSubmissions(id);
+    const submissions = getOrderSubmissions(id).map((submission) => ({
+      ...submission,
+      evidenceFiles: submission.deliverableReferences.flatMap((reference) => {
+        const match = /^evidence:([0-9a-f-]{36}):([0-9a-f]{64})$/i.exec(reference);
+        const file = match ? getServiceEvidenceFile(match[1]) : null;
+        return file && file.orderId === id && file.sha256 === match?.[2].toLowerCase()
+          ? [{ id: file.id, fileName: file.fileName, sha256: file.sha256 }]
+          : [];
+      }),
+    }));
+    const submittedEvidence = new Set(submissions.flatMap((submission) => submission.deliverableReferences));
+    const pendingEvidence = isSeller ? getServiceEvidenceFiles(id)
+      .filter((file) => !submittedEvidence.has(`evidence:${file.id}:${file.sha256}`))
+      .map((file) => ({ id: file.id, fileName: file.fileName, size: file.size, sha256: file.sha256, reference: `evidence:${file.id}:${file.sha256}`, downloadUrl: `/api/services/orders/${encodeURIComponent(id)}/evidence/${file.id}` }))
+      : [];
     const revisions = getOrderRevisions(id);
     const dispute = getDisputeByOrderId(id);
 
@@ -112,6 +128,7 @@ async function handlePOST(
       success: true,
       order: { ...order, network },
       submissions,
+      pendingEvidence,
       revisions,
       dispute,
     });

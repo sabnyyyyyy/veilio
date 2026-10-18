@@ -7,7 +7,7 @@ import {
   SERVICE_NETWORK_CURRENCY,
 } from '@/lib/server/servicesDb';
 import { isAddress, parseEventLogs } from 'viem';
-import { verifyServiceAuth } from '@/lib/server/serviceAuth';
+import { isSolanaAddress, verifyServiceAuth } from '@/lib/server/serviceAuth';
 import { getAgentPublicClientForChain } from '@/lib/agent-sdk/server';
 import {
   VEIL_SERVICE_REGISTRY_ABI,
@@ -20,6 +20,8 @@ import {
 } from '@/lib/serviceRegistry';
 import { calculateSellerReputation } from '@/lib/server/serviceReputation';
 import { verifyServiceOnChain } from '@/lib/server/serviceRegistryVerification';
+import { SolanaChainAdapter } from '@/lib/cross-chain/SolanaChainAdapter';
+import { createRegisterServiceInstruction, DEFAULT_SOLANA_SERVICE_REGISTRY_PROGRAM_ID } from '@/lib/cross-chain/solanaServiceRegistry';
 
 import { withJsonStores } from '@/lib/server/jsonStore';
 async function handleGET(req: NextRequest) {
@@ -92,7 +94,7 @@ const MAX_CREATED_AT_AGE_MS = 6 * 60 * 60 * 1000;
  * The server recomputes the canonical hash from the submitted fields and that createdAt,
  * rejects any mismatch, checks the ServiceRegistered event (id, seller, hash), and stores
  * createdAt verbatim so later verification recomputes the same hash.
- * EVM networks only (BNB 97 / Base 84532); Solana listings are not registered via this route.
+ * BNB 97, Base 84532, and Solana Devnet listings are verified against their native registry.
  */
 async function handlePOST(req: NextRequest) {
   try {
@@ -117,10 +119,6 @@ async function handlePOST(req: NextRequest) {
       auth,
     } = body;
 
-    if (!sellerId || !isAddress(String(sellerId))) {
-      return NextResponse.json({ error: 'Valid seller EVM address is required' }, { status: 400 });
-    }
-
     if (!requestedId || typeof requestedId !== 'string' || !/^[A-Za-z0-9_-]{3,32}$/.test(requestedId)) {
       return NextResponse.json({ error: 'Service id (3-32 chars, [A-Za-z0-9_-]) is required' }, { status: 400 });
     }
@@ -142,8 +140,12 @@ async function handlePOST(req: NextRequest) {
     }
 
     const network = reqNetwork ? normalizeServiceNetwork(reqNetwork) : 'bnb:97';
-    if (!network || network === 'solana:devnet') {
+    if (!network) {
       return NextResponse.json({ error: `Unsupported listing network: ${String(reqNetwork)}` }, { status: 400 });
+    }
+    const isSolana = network === 'solana:devnet';
+    if (typeof sellerId !== 'string' || (isSolana ? !isSolanaAddress(sellerId) : !isAddress(sellerId))) {
+      return NextResponse.json({ error: `Valid seller ${isSolana ? 'Solana' : 'EVM'} address is required` }, { status: 400 });
     }
     const chainId = network === 'base:84532' ? 84532 : 97;
     const currency = SERVICE_NETWORK_CURRENCY[network];
@@ -211,11 +213,41 @@ async function handlePOST(req: NextRequest) {
     }
 
     // 3. On-chain receipt verification (required)
-    if (!txHash || typeof txHash !== 'string' || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
+    if (!txHash || typeof txHash !== 'string' || (isSolana ? !/^[1-9A-HJ-NP-Za-km-z]{86,90}$/.test(txHash) : !/^0x[a-fA-F0-9]{64}$/.test(txHash))) {
       return NextResponse.json(
         { error: 'Valid registry transaction hash is required' },
         { status: 400 }
       );
+    }
+
+    if (isSolana) {
+      const programId = process.env.NEXT_PUBLIC_SOLANA_SERVICE_REGISTRY_PROGRAM_ID || DEFAULT_SOLANA_SERVICE_REGISTRY_PROGRAM_ID;
+      const adapter = new SolanaChainAdapter({ networkId: 'solana:devnet' });
+      const summary = await adapter.getTransactionSummary(txHash, 'confirmed');
+      if (!summary || summary.err) return NextResponse.json({ error: 'Solana registry transaction is not confirmed or failed' }, { status: 400 });
+      const expectedIx = createRegisterServiceInstruction({
+        programId,
+        seller: sellerId,
+        serviceId: formatServiceRegistryId(serviceId),
+        metadataHash: computedMetadataHash,
+        metadataUri: String(metadataURI || `ipfs://QmServiceMeta-${serviceId}`),
+      });
+      const expectedData = Buffer.from(expectedIx.data);
+      const matches = summary.instructions.some((ix) =>
+        ix.programId === programId && ix.accounts[0] === expectedIx.accounts[0].pubkey &&
+        ix.accounts[1] === sellerId && Buffer.from(ix.data).equals(expectedData)
+      );
+      if (!matches || !summary.signers.includes(sellerId)) {
+        return NextResponse.json({ error: 'Solana registry instruction does not match seller, service metadata, or signature' }, { status: 400 });
+      }
+      const created = createService({
+        id: serviceId, sellerId, ...listingFields,
+        status: 'active', ordersCompleted: calculateSellerReputation(sellerId).completedOrders,
+        onChainRegistered: true, registryTxHash: txHash, metadataHash: computedMetadataHash,
+        metadataURI: String(metadataURI || `ipfs://QmServiceMeta-${serviceId}`),
+        onChainServiceId: expectedIx.accounts[0].pubkey, network, createdAt,
+      });
+      return NextResponse.json({ success: true, service: created, metadataHash: computedMetadataHash, onChainVerified: true });
     }
 
     const targetRegistryAddr = getServiceRegistryAddress(chainId);

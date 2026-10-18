@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ServicesNav from '@/components/services/ServicesNav';
-import { useAccount, useWriteContract, usePublicClient, useSwitchChain, useSignMessage, useBalance } from 'wagmi';
+import { useAccount, useWriteContract, usePublicClient, useSwitchChain, useSignMessage, useBalance, useSendTransaction } from 'wagmi';
 import { parseEther, formatEther, stringToHex, pad } from 'viem';
 import {
   VEIL_SERVICE_ESCROW_CONTRACT_ADDRESS,
@@ -55,9 +55,10 @@ export default function OrderDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { address, isConnected, chainId } = useAccount();
-  const { switchChain } = useSwitchChain();
+  const { switchChain, switchChainAsync } = useSwitchChain();
   const publicClient = usePublicClient();
   const { writeContractAsync } = useWriteContract();
+  const { sendTransactionAsync } = useSendTransaction();
   const { signMessageAsync } = useSignMessage();
   const { data: balanceData } = useBalance({ address });
 
@@ -81,6 +82,9 @@ export default function OrderDetailPage() {
   const [txActionLabel, setTxActionLabel] = useState<string>('');
   const [txErrorMessage, setTxErrorMessage] = useState<string | null>(null);
   const [txSuccessMessage, setTxSuccessMessage] = useState<string | null>(null);
+  const [passportBusy, setPassportBusy] = useState(false);
+  const [passportMessage, setPassportMessage] = useState<string | null>(null);
+  const [passportState, setPassportState] = useState<{ buyer: boolean; seller: boolean; anchored: boolean }>({ buyer: false, seller: false, anchored: false });
 
   // Deposit Action State
   const [depositing, setDepositing] = useState(false);
@@ -88,6 +92,8 @@ export default function OrderDetailPage() {
   // Seller Submission State
   const [subDescription, setSubDescription] = useState('');
   const [subDeliverableRef, setSubDeliverableRef] = useState('');
+  const [uploadedEvidence, setUploadedEvidence] = useState<Array<{ id: string; fileName: string; size: number; sha256: string; reference: string; downloadUrl: string }>>([]);
+  const [evidenceUploading, setEvidenceUploading] = useState(false);
   const [submittingWork, setSubmittingWork] = useState(false);
 
   // Buyer Revision State
@@ -224,7 +230,7 @@ export default function OrderDetailPage() {
     return signature;
   };
 
-  const signAuthMessage = async (action: string) => {
+  const signAuthMessage = async (action: string, signedOrderId = orderId) => {
     const callerAddress = isSolanaOrder ? solanaAddress : address;
     if (!callerAddress) throw new Error('No active wallet connected for signing.');
 
@@ -232,7 +238,7 @@ export default function OrderDetailPage() {
     const authNonce = generateAuthNonce();
     const authMessage = createServiceAuthMessage({
       action,
-      orderId,
+      orderId: signedOrderId,
       address: callerAddress,
       timestamp: authTimestamp,
       nonce: authNonce,
@@ -256,6 +262,123 @@ export default function OrderDetailPage() {
       timestamp: authTimestamp,
       nonce: authNonce,
     };
+  };
+
+  const approveTrustPassport = async () => {
+    if (!order) return;
+    try {
+      setPassportBusy(true);
+      setPassportMessage(null);
+      const payloadRes = await fetch(`/api/services/passport/orders/${encodeURIComponent(order.id)}`, { cache: 'no-store' });
+      const payload = await payloadRes.json();
+      if (!payloadRes.ok || !payload.success) throw new Error(payload.error || 'Could not prepare passport record.');
+      const auth = await signAuthMessage('trust-passport-approve', `${order.id}:${payload.proofHash}`);
+      const response = await fetch(`/api/services/passport/${encodeURIComponent(order.sellerId)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: order.id, auth }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not record approval.');
+      setPassportState((state) => ({ ...state, buyer: result.record?.buyerApproval != null, seller: result.record?.sellerApproval != null }));
+      if (result.mutuallyApproved) {
+        await anchorTrustPassport();
+      } else {
+        setPassportMessage('Approval saved. The other party must approve; after that, either participant can anchor the proof on-chain.');
+      }
+    } catch (error) {
+      setPassportMessage(error instanceof Error ? error.message : 'Trust Passport approval failed.');
+    } finally {
+      setPassportBusy(false);
+    }
+  };
+
+  const uploadServiceEvidence = async (file?: File) => {
+    if (!order || !file) return;
+    try {
+      setEvidenceUploading(true);
+      const auth = await signAuthMessage('upload-service-evidence');
+      const form = new FormData();
+      form.set('file', file);
+      form.set('auth', JSON.stringify(auth));
+      const response = await fetch(`/api/services/orders/${encodeURIComponent(order.id)}/evidence`, { method: 'POST', body: form });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Evidence upload failed.');
+      setUploadedEvidence((current) => [...current, result.evidence]);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Evidence upload failed.');
+    } finally {
+      setEvidenceUploading(false);
+    }
+  };
+
+  const downloadServiceEvidence = async (evidenceId: string, fileName: string) => {
+    if (!order) return;
+    try {
+      const auth = await signAuthMessage('download-service-evidence', `${order.id}:${evidenceId}`);
+      const response = await fetch(`/api/services/orders/${encodeURIComponent(order.id)}/evidence/${encodeURIComponent(evidenceId)}`, {
+        headers: { 'x-veilio-auth': JSON.stringify(auth) },
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.error || 'Could not download evidence.');
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Evidence download failed.');
+    }
+  };
+
+  const anchorTrustPassport = async () => {
+    if (!order) return;
+    setPassportBusy(true);
+    try {
+      setPassportMessage('Both parties approved. Prepare the public chain reference in your wallet…');
+      const preparedResponse = await fetch(`/api/services/passport/orders/${encodeURIComponent(order.id)}/anchor`, { cache: 'no-store' });
+      const prepared = await preparedResponse.json();
+      if (!preparedResponse.ok || !prepared.success) throw new Error(prepared.error || 'Could not prepare the chain anchor.');
+      if (prepared.alreadyAnchored) {
+        setPassportState({ buyer: true, seller: true, anchored: true });
+        setPassportMessage('Trust Passport proof is already verified on-chain.');
+        return;
+      }
+      if (!prepared.approvals?.buyer || !prepared.approvals?.seller || !prepared.payload) throw new Error('Both parties must approve the same proof before it can be anchored.');
+
+      let txHash = '';
+      if (isSolanaOrder) {
+        const memoProgram = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
+        txHash = await sendSolanaTx({
+          programId: memoProgram,
+          keys: solanaAddress ? [{ pubkey: solanaAddress, isSigner: true, isWritable: false }] : [],
+          data: new TextEncoder().encode(prepared.payload),
+        });
+      } else {
+        if (!address) throw new Error('Connect the EVM wallet that approved this record.');
+        if (chainId !== expectedChainId) await switchChainAsync({ chainId: expectedChainId });
+        txHash = await sendTransactionAsync({ to: address, value: 0n, data: stringToHex(prepared.payload), chainId: expectedChainId });
+      }
+
+      setPassportMessage('Transaction sent. Verifying the proof against the selected chain…');
+      let result: any;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        if (attempt) await new Promise((resolve) => setTimeout(resolve, 1200));
+        const response = await fetch(`/api/services/passport/orders/${encodeURIComponent(order.id)}/anchor`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ transaction: txHash }),
+        });
+        result = await response.json();
+        if (response.ok && result.success) break;
+        if (attempt === 4) throw new Error(result.error || 'Chain anchor verification failed.');
+      }
+      setPassportState({ buyer: true, seller: true, anchored: true });
+      setPassportMessage(`Passport proof anchored and verified: ${txHash}`);
+    } catch (error) {
+      setPassportMessage(error instanceof Error ? error.message : 'Could not anchor Passport proof.');
+    } finally {
+      setPassportBusy(false);
+    }
   };
 
   const fetchOrderData = async () => {
@@ -305,6 +428,7 @@ export default function OrderDetailPage() {
       if (data.success && data.order) {
         setOrder(data.order);
         setSubmissions(data.submissions || []);
+        setUploadedEvidence(data.pendingEvidence || []);
         setRevisions(data.revisions || []);
         setDispute(data.dispute || null);
       } else {
@@ -323,6 +447,22 @@ export default function OrderDetailPage() {
   useEffect(() => {
     if (orderId) fetchOrderData();
   }, [orderId, address, solanaAddress]);
+
+  useEffect(() => {
+    if (!order?.id) return;
+    let active = true;
+    fetch(`/api/services/passport/orders/${encodeURIComponent(order.id)}/anchor`, { cache: 'no-store' })
+      .then(async (response) => ({ response, data: await response.json() }))
+      .then(({ data }) => {
+        if (active && data.success) setPassportState({
+          buyer: Boolean(data.approvals?.buyer),
+          seller: Boolean(data.approvals?.seller),
+          anchored: Boolean(data.alreadyAnchored || data.anchor),
+        });
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [order?.id]);
 
   // Buyer deposits funds into on-chain escrow
   const handleDepositEscrow = async () => {
@@ -534,7 +674,7 @@ export default function OrderDetailPage() {
 
     try {
       setSubmittingWork(true);
-      const deliverableRef = subDeliverableRef.trim() || `order-${order.id}-deliverables`;
+      const deliverableRef = subDeliverableRef.trim() || uploadedEvidence[0]?.reference || `order-${order.id}-deliverables`;
 
       // Mandatory on-chain delivery registration. Errors are NOT swallowed: if the escrow
       // is not marked Delivered on-chain, the buyer could still claim a timeout refund.
@@ -577,7 +717,7 @@ export default function OrderDetailPage() {
         body: JSON.stringify({
           sellerAddress: effectiveAddress,
           description: subDescription.trim(),
-          deliverableReferences: subDeliverableRef.trim() ? [subDeliverableRef.trim()] : [],
+          deliverableReferences: [...(subDeliverableRef.trim() ? [subDeliverableRef.trim()] : []), ...uploadedEvidence.map((item) => item.reference)],
           deliveryTxHash: deliveryTx,
           auth: authData,
         }),
@@ -587,6 +727,7 @@ export default function OrderDetailPage() {
       if (data.success) {
         setSubDescription('');
         setSubDeliverableRef('');
+        setUploadedEvidence([]);
         fetchOrderData();
         alert('Deliverables successfully submitted for buyer review!');
       } else {
@@ -1360,6 +1501,14 @@ export default function OrderDetailPage() {
                       />
                     </div>
 
+                    <div className="space-y-2 rounded-xl border border-white/10 bg-[#0A0A09] p-4">
+                      <label className="block text-[10px] uppercase tracking-widest text-[#A8A397] font-bold">Attach completion evidence · max 10 MB each</label>
+                      <p className="text-[11px] text-[#77746B]">Private files are visible only to the buyer and seller. The Passport publishes their SHA-256 hash, not the file.</p>
+                      <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.json,.zip,.md" disabled={evidenceUploading} onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void uploadServiceEvidence(file); event.currentTarget.value = ''; }} className="block w-full text-xs text-[#A8A397] file:mr-3 file:rounded-lg file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-[#F5F2E8] disabled:opacity-50" />
+                      {evidenceUploading && <p className="text-xs text-[#E6CC91]">Uploading privately and calculating file hash…</p>}
+                      {uploadedEvidence.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-xs"><span className="text-[#F5F2E8]">{item.fileName} · {(item.size / 1024).toFixed(1)} KB</span><span className="font-mono text-[#8E897D]">SHA-256 {item.sha256.slice(0, 14)}…</span></div>)}
+                    </div>
+
                     <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                       <button
                         type="submit"
@@ -1559,16 +1708,35 @@ export default function OrderDetailPage() {
 
               {/* Completed Notice */}
               {order.status === 'Completed' && (
-                <div className="p-6 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-4">
-                  <CheckCircle2 className="w-8 h-8 text-emerald-400 shrink-0" />
-                  <div className="space-y-1">
-                    <h4 className="text-sm font-bold text-emerald-400 uppercase tracking-wider">
-                      Order Successfully Completed & Settled
-                    </h4>
-                    <p className="text-xs text-[#A8A397]">
-                      The buyer approved the deliverable and escrow settlement was executed on-chain.
-                    </p>
+                <div className="space-y-3">
+                  <div className="p-6 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-4">
+                    <CheckCircle2 className="w-8 h-8 text-emerald-400 shrink-0" />
+                    <div className="space-y-1">
+                      <h4 className="text-sm font-bold text-emerald-400 uppercase tracking-wider">Order Successfully Completed & Settled</h4>
+                      <p className="text-xs text-[#A8A397]">The buyer approved the deliverable and escrow settlement was executed on-chain.</p>
+                    </div>
                   </div>
+                  {order.paymentStatus === 'Released' && order.escrowTxHash && (isBuyer || isSeller) && (
+                    <div className="p-5 rounded-2xl bg-[#151512] border border-[#C9A45C]/20 space-y-3">
+                      <div>
+                        <h4 className="text-sm font-bold text-[#F5F2E8]">AI Vendor Trust Passport</h4>
+                        <p className="mt-1 text-xs text-[#A8A397]">Both wallets approve the same completion and evidence hash. One participant then anchors its reference on the order’s chain. Anchoring costs a network fee and transfers no tokens.</p>
+                      </div>
+                      {passportState.buyer && passportState.seller && !passportState.anchored && (
+                        <button type="button" onClick={anchorTrustPassport} disabled={passportBusy} className="mr-2 px-4 py-2.5 rounded-xl border border-[#C9A45C]/40 text-[#E6CC91] text-xs font-bold disabled:opacity-60">
+                          {passportBusy ? 'Waiting for wallet…' : 'Anchor approved proof on-chain'}
+                        </button>
+                      )}
+                      {!passportState.anchored && (
+                        <button type="button" onClick={approveTrustPassport} disabled={passportBusy || (isBuyer ? passportState.buyer : passportState.seller)} className="px-4 py-2.5 rounded-xl bg-[#C9A45C] text-[#0A0A09] text-xs font-bold disabled:opacity-60">
+                          {passportBusy ? 'Waiting for wallet…' : (isBuyer ? passportState.buyer : passportState.seller) ? 'Your approval is saved' : 'Approve performance record'}
+                        </button>
+                      )}
+                      {passportState.anchored && <p className="text-xs text-emerald-300">Approved by both parties and anchored on-chain.</p>}
+                      {passportMessage && <p className="text-xs text-[#A8A397]">{passportMessage}</p>}
+                      <a className="block text-xs text-[#C9A45C] hover:underline" href={`/services/passport/${encodeURIComponent(order.sellerId)}`}>View vendor Trust Passport →</a>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1621,18 +1789,11 @@ export default function OrderDetailPage() {
                         <p className="text-xs text-[#F5F2E8] leading-relaxed">{sub.description}</p>
                         {sub.deliverableReferences && sub.deliverableReferences.length > 0 && (
                           <div className="pt-2 flex flex-wrap gap-2">
-                            {sub.deliverableReferences.map((ref, idx) => (
-                              <a
-                                key={idx}
-                                href={ref}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/5 hover:bg-white/10 text-xs font-mono text-[#C9A45C] rounded-lg border border-white/5"
-                              >
-                                <ExternalLink className="w-3 h-3" />
-                                <span>Artifact: {ref.length > 35 ? ref.slice(0, 35) + '...' : ref}</span>
-                              </a>
-                            ))}
+                            {sub.deliverableReferences.map((ref, idx) => {
+                              const match = /^evidence:([0-9a-f-]{36}):([0-9a-f]{64})$/i.exec(ref);
+                              const evidence = match ? { id: match[1], file: sub.evidenceFiles?.find((item) => item.id === match[1])?.fileName || uploadedEvidence.find((item) => item.id === match[1])?.fileName || 'Private evidence file' } : null;
+                              return evidence ? <button key={idx} type="button" onClick={() => downloadServiceEvidence(evidence.id, evidence.file)} className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/5 hover:bg-white/10 text-xs font-mono text-[#C9A45C] rounded-lg border border-white/5"><ExternalLink className="w-3 h-3" /><span>Download private evidence · {match?.[2].slice(0, 12)}…</span></button> : <a key={idx} href={ref} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/5 hover:bg-white/10 text-xs font-mono text-[#C9A45C] rounded-lg border border-white/5"><ExternalLink className="w-3 h-3" /><span>Artifact: {ref.length > 35 ? ref.slice(0, 35) + '...' : ref}</span></a>;
+                            })}
                           </div>
                         )}
                       </div>
