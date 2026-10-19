@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1
+
+- Point the BNB Testnet auction default to the patched VeilNFTV4 deployment that rejects zero bid commitments.
+
 ## 0.5.0
 
 ### Added

@@ -24,7 +24,7 @@ describe('VEILIO Milestone 1 — Cross-Chain Adapters', () => {
       expect(config.environment).to.equal('testnet');
       expect(config.displayName).to.equal('BNB Smart Chain Testnet');
       expect(config.verificationStatus).to.equal('verified_active');
-      expect(config.contracts.auction).to.equal('0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1');
+      expect(config.contracts.auction).to.equal('0x9e2d9Dcc76192b54eBF0106da09787428eAF3EE7');
       expect(config.contracts.nftCustody).to.equal(config.contracts.auction);
     });
 

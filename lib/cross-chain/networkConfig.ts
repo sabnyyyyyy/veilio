@@ -9,10 +9,12 @@ import { CanonicalNetworkId, ChainFamily, NetworkEnvironment } from './types';
 
 // Keep in sync with lib/contract.ts (VEIL_V3_CONTRACT_ADDRESS): the active BNB
 // auction is VeilNFTV4, which is also the NFT custody contract.
-const BNB_TESTNET_AUCTION_ADDRESS =
-  process.env.NEXT_PUBLIC_V4_CONTRACT_ADDRESS ||
-  process.env.NEXT_PUBLIC_V3_CONTRACT_ADDRESS ||
-  '0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1';
+const PATCHED_BNB_TESTNET_AUCTION_ADDRESS = '0x9e2d9Dcc76192b54eBF0106da09787428eAF3EE7';
+const AFFECTED_BNB_TESTNET_AUCTION_ADDRESS = '0xc12ecd53b9dae1753409b87f10bf00684bf7d8b1';
+const configuredBnbAuctionAddress = process.env.NEXT_PUBLIC_V4_CONTRACT_ADDRESS || process.env.NEXT_PUBLIC_V3_CONTRACT_ADDRESS;
+const BNB_TESTNET_AUCTION_ADDRESS = configuredBnbAuctionAddress?.toLowerCase() === AFFECTED_BNB_TESTNET_AUCTION_ADDRESS
+  ? PATCHED_BNB_TESTNET_AUCTION_ADDRESS
+  : configuredBnbAuctionAddress || PATCHED_BNB_TESTNET_AUCTION_ADDRESS;
 
 export interface NetworkConfig {
   readonly networkId: CanonicalNetworkId;

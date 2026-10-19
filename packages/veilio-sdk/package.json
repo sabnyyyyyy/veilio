@@ -1,6 +1,6 @@
 {
   "name": "veilioexchange",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "TypeScript SDK for VEILIO: sealed-bid auctions and milestone service escrow on BNB Smart Chain Testnet, Base Sepolia and Solana Devnet.",
   "license": "MIT",
   "type": "module",

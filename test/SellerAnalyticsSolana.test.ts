@@ -104,7 +104,7 @@ describe('VEILIO — Seller Analytics Solana Devnet Integration Suite', () => {
       const bnbConfig = getAuctionContractConfig(97);
       expect(bnbConfig.address).to.match(/^0x[a-fA-F0-9]{40}$/);
       expect(bnbConfig.address.toLowerCase()).to.be.oneOf([
-        '0xc12ecd53b9dae1753409b87f10bf00684bf7d8b1',
+        '0x9e2d9dcc76192b54ebf0106da09787428eaf3ee7',
         '0x0d1c307b4d59143703ae38fb6479dac1fec987',
       ]);
 

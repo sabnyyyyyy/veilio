@@ -11,11 +11,11 @@
 - Redacted structured audit logs. File names, content, signatures, keys, and file hashes are excluded.
 - Regression coverage for the zero-commitment accounting bug described below.
 
-## Critical contract finding
+## Critical contract finding and remediation
 
-The previous deployed V4 bytecode cannot be changed. It accepts `bytes32(0)` as a commitment even though zero is also used as the "no commitment" sentinel. A wallet can submit repeated zero commitments; the bidder list then contains duplicate addresses while the mapping keeps only the latest deposit. Settlement can credit refunds repeatedly against that one recorded deposit. The source now rejects zero commitments in VeilV2, VeilV3, and VeilNFTV4 through inheritance.
+The previous BNB Testnet V4 deployment at `0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1` accepts `bytes32(0)` as a commitment, even though zero is also used as the "no commitment" sentinel. A wallet could submit repeated zero commitments and distort bidder/refund accounting. That immutable deployment remains affected.
 
-Do not run valuable auctions on an affected deployed address. Deploy the patched contract as a new address, verify it on BNB Testnet, switch the application address only after checking reviewer/fee-recipient configuration, and retain access to auctions on the old contract. A contract change needs fresh deployment and cannot be applied by a frontend release.
+The patched `VeilNFTV4` was redeployed to BNB Testnet at `0x9e2d9Dcc76192b54eBF0106da09787428eAF3EE7`; its inherited `commitBid` rejects a zero commitment. Configure `NEXT_PUBLIC_V4_CONTRACT_ADDRESS` to this address in every app/keeper hosting environment before using the hosted app. The repository and SDK defaults point to the patched deployment. Old test auctions remain on the old contract and are not migrated. This remediation is not an independent contract audit.
 
 ## Required deployment configuration
 

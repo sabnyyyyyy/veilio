@@ -8,7 +8,7 @@ import type { Address } from 'viem';
 export const VEILIO_DEPLOYMENTS = {
   bnbTestnet: {
     chainId: 97,
-    auction: '0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1' as Address,
+    auction: '0x9e2d9Dcc76192b54eBF0106da09787428eAF3EE7' as Address,
     serviceEscrow: '0xEd83D9f97c01a94d235927704638d6e765501f50' as Address,
     serviceRegistry: '0x016A23A069180587d5D8B09413e97E1e78ccD702' as Address,
   },
