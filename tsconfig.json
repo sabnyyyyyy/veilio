@@ -34,6 +34,7 @@
   "node_modules",
   "packages",
   "test",
-  "typechain-types"
+  "typechain-types",
+  "telegraph-veilio"
 ]
 }

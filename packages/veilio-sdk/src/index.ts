@@ -111,6 +111,7 @@ function assertWalletOnChain(walletClient: WalletClient | undefined, targetChain
 
 /** Subset of the deployed VeilNFTV4 auction ABI (BNB testnet + Base Sepolia) used by the agent. */
 export const veilAuctionAbi = parseAbi([
+  'function createAuction(string itemName, string description, string imageURI, uint256 startingPrice, uint256 commitDuration, uint256 revealDuration, uint256 inspectionDuration) returns (uint256 auctionId)',
   'function auctionCount() view returns (uint256)',
   'function auctions(uint256 auctionId) view returns (uint256 id, address seller, string itemName, string description, string imageURI, uint256 startingPrice, uint256 commitEndTime, uint256 revealEndTime, uint256 inspectionDuration, uint256 inspectionEndTime, uint8 state, address highestBidder, uint256 highestBid, uint256 bidderCount, uint256 revealedCount, bytes32 finalTxHash, string evidenceHash, string reviewReason)',
   'function getAuctionState(uint256 auctionId) view returns (uint8)',
@@ -956,7 +957,7 @@ export function createVeilioAgent(options: VeilioAgentOptions) {
 
   async function write(
     walletClient: WalletClient,
-    functionName: 'commitBid' | 'revealBid' | 'settleAuction' | 'acceptDataset' | 'finalizeSettlement' | 'requestRefund' | 'withdrawRefund',
+    functionName: 'createAuction' | 'commitBid' | 'revealBid' | 'settleAuction' | 'acceptDataset' | 'finalizeSettlement' | 'requestRefund' | 'withdrawRefund',
     args: readonly unknown[],
     value?: bigint
   ): Promise<Hex> {
@@ -972,6 +973,36 @@ export function createVeilioAgent(options: VeilioAgentOptions) {
   }
 
   const nowSeconds = () => BigInt(Math.floor(Date.now() / 1000));
+
+  /** Creates an EVM auction listing. The connected seller wallet signs and pays gas. */
+  async function createAuction(input: {
+    itemName: string;
+    description: string;
+    imageURI: string;
+    startingPrice: string;
+    commitDurationSeconds: number;
+    revealDurationSeconds: number;
+    inspectionDurationSeconds: number;
+  }): Promise<Hex> {
+    const walletClient = requireWallet();
+    if (!input.itemName.trim() || !input.description.trim()) {
+      throw new VeilioSdkError({ code: 'INVALID_INPUT', message: 'Auction itemName and description are required.' });
+    }
+    if (!input.imageURI.trim()) {
+      throw new VeilioSdkError({ code: 'INVALID_INPUT', message: 'imageURI is required.' });
+    }
+    if (!Number.isSafeInteger(input.commitDurationSeconds) || input.commitDurationSeconds < 60 ||
+        !Number.isSafeInteger(input.revealDurationSeconds) || input.revealDurationSeconds < 60 ||
+        !Number.isSafeInteger(input.inspectionDurationSeconds) || input.inspectionDurationSeconds < 3600) {
+      throw new VeilioSdkError({ code: 'INVALID_INPUT', message: 'Commit/reveal must be at least 60 seconds and inspection at least 3600 seconds.' });
+    }
+    const startingPrice = parseEther(input.startingPrice);
+    if (startingPrice <= 0n) throw new VeilioSdkError({ code: 'INVALID_INPUT', message: 'startingPrice must be positive.' });
+    return write(walletClient, 'createAuction', [
+      input.itemName.trim(), input.description.trim(), input.imageURI.trim(), startingPrice,
+      BigInt(input.commitDurationSeconds), BigInt(input.revealDurationSeconds), BigInt(input.inspectionDurationSeconds),
+    ]);
+  }
 
   async function commitBid(prepared: PreparedBid, depositAmount: string): Promise<Hex> {
     const walletClient = requireWallet();
@@ -1196,6 +1227,7 @@ export function createVeilioAgent(options: VeilioAgentOptions) {
     chainId: targetChainId,
     getAuction,
     listAuctions,
+    createAuction,
     searchAssets,
     getAssetDetails,
     evaluateAsset,

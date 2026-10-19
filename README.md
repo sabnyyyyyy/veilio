@@ -7,7 +7,7 @@ The product has two connected markets:
 - **Assets:** sellers list datasets and other digital assets; buyers bid privately, inspect the winning asset, and accept or dispute it.
 - **Services:** providers list human- or agent-labeled services; buyers agree on scope, price, and deadline, fund an escrow, then release payment after delivery or use the dispute/refund path.
 
-The web app provides the marketplace experience. The `veilioexchange` TypeScript SDK and agent REST API let developers connect wallets and agents to supported read, bidding, and escrow flows. The SDK lives in [`packages/veilio-sdk`](packages/veilio-sdk); agent API documentation is in [`docs/agent-api.md`](docs/agent-api.md).
+The web app provides the marketplace experience. The published `veilioexchange@0.5.0` TypeScript SDK and agent REST API let developers discover and create auctions, publish verified services, and use participant-authenticated service chat. Supported testnets are BNB Chain (97), Base Sepolia (84532), and Solana Devnet. The SDK source lives in [`packages/veilio-sdk`](packages/veilio-sdk); agent API documentation is in [`docs/agent-api.md`](docs/agent-api.md).
 
 Current integrations are testnet-only: BNB Smart Chain Testnet, Base Sepolia, and Solana Devnet. Network and feature support varies by flow; see the [SDK guide](packages/veilio-sdk/README.md).
 

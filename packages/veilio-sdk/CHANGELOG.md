@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0
+
+### Added
+- EVM `createVeilioAgent().createAuction()` to create BNB Testnet / Base Sepolia auction listings.
+- Solana `createVeilioSolanaClient().createAuction()` using AuctionConfig's reviewer and a checked next ID.
+- Services API methods `listServices`, `startConversation`, `sendMessage`, and `publishService`.
+- `publishService` waits for registry confirmation and validates `ServiceRegistered` before syncing the listing;
+  a sync failure retains the confirmed transaction hash in error context for safe recovery.
+- Solana Ed25519 message signer adapters, Solana registry `registerService`, and Services API
+  `publishSolanaService` / `syncSolanaServiceListing`; list, conversation, and chat methods now accept
+  either EVM or Solana message signers.
+
 ## 0.4.0
 
 ### Added

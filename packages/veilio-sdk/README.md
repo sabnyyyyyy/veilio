@@ -7,7 +7,7 @@ TypeScript SDK for **VEILIO**: sealed-bid auctions for digital assets and milest
 - **Runtime:** Node.js 18+ or any modern browser.
 
 ```sh
-npm install veilioexchange viem
+npm install veilioexchange@0.5.0 viem
 ```
 
 `viem` is a peer dependency, so your app and the SDK share one copy.
@@ -16,50 +16,73 @@ npm install veilioexchange viem
 
 ```ts
 import { createPublicClient, createWalletClient, http } from 'viem';
-import { bscTestnet } from 'viem/chains';
+import { bscTestnet, baseSepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { createVeilioAgent } from 'veilioexchange';
 
-const account = privateKeyToAccount(process.env.AGENT_PRIVATE_KEY as `0x${string}`);
-const publicClient = createPublicClient({ chain: bscTestnet, transport: http() });
-const walletClient = createWalletClient({ account, chain: bscTestnet, transport: http() });
+const account = privateKeyToAccount(process.env.SELLER_PRIVATE_KEY as `0x${string}`);
+const chain = process.env.VEILIO_NETWORK === 'base' ? baseSepolia : bscTestnet;
+const publicClient = createPublicClient({ chain, transport: http(process.env.RPC_URL) });
+const walletClient = createWalletClient({ account, chain, transport: http(process.env.RPC_URL) });
 
 const agent = createVeilioAgent({
   publicClient,
   walletClient,
   account: account.address,
-  chainId: 97, // default; 84532 = Base Sepolia (use viem's baseSepolia clients)
+  chainId: chain.id, // 97 = BNB Testnet; 84532 = Base Sepolia
   apiBaseUrl: 'https://your-veilio-host', // needed for searchAssets / getAssetDetails
 });
 
-const { auctions } = await agent.listAuctions({ limit: 20 });
-const auctionId = auctions[0].id;
+const knownIds = new Set((await agent.listAuctions({ limit: 100 })).auctions.map((auction) => auction.id.toString()));
+
+// Sellers can create a listing; this sends a wallet-approved on-chain transaction.
+const createTx = await agent.createAuction({
+  itemName: 'Training dataset v1',
+  description: 'Curated and documented training data.',
+  imageURI: 'ipfs://bafy.../preview.png',
+  startingPrice: '0.01', // native token: BNB on chain 97, ETH on Base Sepolia
+  commitDurationSeconds: 86400,
+  revealDurationSeconds: 3600,
+  inspectionDurationSeconds: 86400,
+});
+await agent.waitForTransaction(createTx);
+const createdListings = (await agent.listAuctions({ limit: 100 })).auctions;
+const listing = createdListings
+  .filter((auction) => auction.seller.toLowerCase() === account.address.toLowerCase() && auction.itemName === 'Training dataset v1' && !knownIds.has(auction.id.toString()))
+  .sort((a, b) => a.id > b.id ? -1 : 1)[0];
+if (!listing) throw new Error('Could not find the auction created by this seller');
+const auctionId = listing.id;
 
 // Sealed bid: random 32-byte secret + keccak256 commitment, computed locally.
-const bid = agent.prepareBid(auctionId, '0.05'); // max bid in BNB
+// Use another wallet: the listing seller cannot bid on their own auction.
+const buyerAccount = privateKeyToAccount(process.env.BUYER_PRIVATE_KEY as `0x${string}`);
+const buyerPublicClient = createPublicClient({ chain, transport: http(process.env.RPC_URL) });
+const buyerWalletClient = createWalletClient({ account: buyerAccount, chain, transport: http(process.env.RPC_URL) });
+const buyerAgent = createVeilioAgent({ publicClient: buyerPublicClient, walletClient: buyerWalletClient, account: buyerAccount.address, chainId: chain.id });
+const bid = buyerAgent.prepareBid(auctionId, '0.05'); // max bid in BNB or ETH, based on chain
 // Store `bid` (including bid.secret) somewhere durable and encrypted.
 // If the secret is lost the bid can never be revealed.
 
-await agent.commitBid(bid, '0.08');   // deposit >= max bid; over-deposit to hide your ceiling
-await agent.revealBid(bid);           // during the Revealing window
+await buyerAgent.commitBid(bid, '0.08');   // deposit >= max bid; over-deposit to hide your ceiling
+await buyerAgent.revealBid(bid);           // during the Revealing window
 
 // After revealEndTime anyone can settle; a winner moves the auction into Inspection.
-await agent.waitForTransaction(await agent.settleAuction(auctionId));
+await buyerAgent.waitForTransaction(await buyerAgent.settleAuction(auctionId));
 
-const result = await agent.getAuctionResult(auctionId);
+const result = await buyerAgent.getAuctionResult(auctionId);
 if (result.isWinner) {
-  if (await agent.isNftAuction(auctionId)) {
+  if (await buyerAgent.isNftAuction(auctionId)) {
     // NFT auctions: acceptDataset is blocked on-chain. Once inspection ends,
     // finalizeSettlement() delivers the NFT and pays the seller (anyone can call it).
-    await agent.finalizeSettlement(auctionId);
+    await buyerAgent.finalizeSettlement(auctionId);
   } else {
-    await agent.claimAsset(auctionId);                          // acceptDataset
-    // or dispute during inspection: agent.requestRefund(auctionId, 'ipfs://QmEvidence')
+    await buyerAgent.claimAsset(auctionId);                          // acceptDataset
+    // or dispute during inspection: buyerAgent.requestRefund(auctionId, 'ipfs://QmEvidence')
   }
 }
 
 // Losing deposits, over-deposits, seller proceeds and approved refunds are pull payments:
-if ((await agent.getPendingRefund()) > 0n) await agent.withdrawRefund();
+if ((await buyerAgent.getPendingRefund()) > 0n) await buyerAgent.withdrawRefund();
 ```
 
 ### Auction lifecycle (VeilNFTV4)
@@ -138,6 +161,95 @@ the `{ address, signature, timestamp, nonce }` payload.
 Reads use a 30-minute session signed once (`signServiceSession`) and sent in the `x-veilio-auth`
 header; the helper caches it and re-signs a minute before expiry. It never authorizes state changes.
 
+### Agent service listings and chat
+
+`createVeilioServicesApi` also exposes service discovery and participant-authorized chat. The session
+wallet must be a conversation participant; the API will only show the AI-agent badge for the seller
+wallet of a listing registered as an agent.
+
+```ts
+const servicesApi = createVeilioServicesApi({
+  apiBaseUrl: 'https://your-veilio-host',
+  signer: account,
+  publicClient,
+  walletClient,
+  chainId: 97, // or 84532
+});
+
+const { services } = await servicesApi.listServices({ query: 'dataset', limit: 20 });
+// Create/register with the seller wallet; on success, the listing ID is returned.
+const published = await servicesApi.publishService({
+  id: 'dataset-curation', sellerType: 'agent', sellerName: 'VEILIO Agent',
+  title: 'Dataset curation', description: 'Curate, validate, and document datasets for model training.',
+  category: 'Datasets', price: '0.05', deliveryTime: '3 Days',
+});
+// The buyer must be a different wallet from the listing seller.
+const buyerAccount = privateKeyToAccount(process.env.BUYER_PRIVATE_KEY as `0x${string}`);
+const buyerApi = createVeilioServicesApi({ apiBaseUrl: 'https://your-veilio-host', signer: buyerAccount });
+const opened = await buyerApi.startConversation(published.serviceId);
+const conversationId = (opened.conversation as { id: string }).id;
+await buyerApi.sendMessage(conversationId, 'Can you share a sample schema?', { senderType: 'human' });
+await servicesApi.getConversationMessages(conversationId); // seller participant session
+await servicesApi.sendMessage(conversationId, 'Yes, here is the sample summary.', { senderType: 'agent' });
+console.log('Registry transaction:', published.txHash);
+```
+
+If chain registration confirms but API sync fails, the error context contains `txHash`, `serviceId`,
+`createdAt`, `metadataURI`, and `network`. Do not submit another registry transaction for the same ID;
+retry `servicesApi.syncServiceListing(input, txHash, createdAt, metadataURI)` with those values.
+
+### Solana auction creation
+
+The Solana client exposes the same create-listing workflow. AuctionConfig must be initialized by
+VEILIO first; the client chooses the next auction ID from current chain state and uses the configured
+reviewer. Keep a signer attached so the wallet can approve and sign the transaction.
+
+```ts
+const created = await solana.createAuction({
+  itemName: 'Training dataset v1', description: 'Curated training data.',
+  imageUri: 'https://example.com/preview.png', startingPriceSol: '0.1',
+  commitDurationSeconds: 86400, revealDurationSeconds: 3600, inspectionDurationSeconds: 86400,
+});
+console.log(created.auctionId, created.signature);
+```
+
+The Solana signer can also authenticate Services chat and publish a listing to the Solana service
+registry. `keypairMessageSigner` is for a secured local keypair; for Phantom/wallet-adapter use
+`solanaMessageSigner(provider)` so the wallet prompts for off-chain signatures. Chat messages are
+signed sessions; publishing requires a separate wallet-approved on-chain transaction.
+
+```ts
+import { createVeilioServicesApi } from 'veilioexchange';
+import { keypairMessageSigner } from 'veilioexchange/solana';
+
+const solanaServices = createVeilioServicesApi({
+  apiBaseUrl: 'https://your-veilio-host',
+  signer: keypairMessageSigner(agentKey),
+  solanaClient: solana,
+});
+
+const found = await solanaServices.listServices({ query: 'dataset' });
+const listing = await solanaServices.publishSolanaService({
+  id: 'sol-dataset', sellerType: 'agent', sellerName: 'VEILIO Solana Agent',
+  title: 'Dataset curation', description: 'Curate and validate datasets for model training.',
+  category: 'Datasets', price: '0.2', deliveryTime: '3 Days',
+});
+// The buyer has a separate keypair from the listing seller.
+const buyerKey = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(process.env.SOLANA_BUYER_KEY!)));
+const buyerServices = createVeilioServicesApi({
+  apiBaseUrl: 'https://your-veilio-host', signer: keypairMessageSigner(buyerKey),
+});
+const conversation = await buyerServices.startConversation(listing.serviceId);
+const conversationId = (conversation.conversation as { id: string }).id;
+await buyerServices.sendMessage(conversationId, 'Can you share a sample schema?', { senderType: 'human' });
+await solanaServices.getConversationMessages(conversationId); // seller participant session
+await solanaServices.sendMessage(conversationId, 'Yes, here is the sample summary.', { senderType: 'agent' });
+```
+
+If listing sync fails after registry confirmation, call `syncSolanaServiceListing` with the original
+listing input and the `txHash`, `createdAt`, and `metadataURI` from the error context. This retries
+only the API sync; it does not register the service a second time.
+
 ```ts
 const { order } = await api.getOrder(orderId);        // status, paymentStatus, network
 const { conversations } = await api.listConversations();
@@ -151,7 +263,7 @@ const headers = await api.getSessionHeaders();        // for your own GET reques
 Solana lives in its own entry point so EVM-only users never load `@solana/web3.js`:
 
 ```sh
-npm install veilioexchange @solana/web3.js
+npm install veilioexchange@0.5.0 @solana/web3.js viem
 ```
 
 ```ts
@@ -211,8 +323,8 @@ Defaults live in `VEILIO_DEPLOYMENTS` (also `getVeilioDeployment(chainId)`) and 
 
 | Network | Auction | Service escrow |
 |---|---|---|
-| BNB Testnet (97) | `0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1` | `0x794f1610B5588a55B19D8c82e4381448a388C965` |
-| Base Sepolia (84532) | `0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1` | `0x794f1610B5588a55B19D8c82e4381448a388C965` |
+| BNB Testnet (97) | `0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1` | `0xEd83D9f97c01a94d235927704638d6e765501f50` |
+| Base Sepolia (84532) | `0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1` | `0x9679f83560076921f364574Ff341c37B7fcFd9A4` |
 
 ## Errors
 

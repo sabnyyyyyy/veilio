@@ -20,69 +20,94 @@ type DocsTab = 'auctions' | 'services' | 'solana' | 'agent' | 'api' | 'bat';
 
 // Every snippet below is aligned with the veilioexchange SDK source package and the real API routes.
 const SDK_PACKAGE = 'veilioexchange';
-const INSTALL_COMMAND = `npm install ${SDK_PACKAGE} viem`;
+const SDK_VERSION = '0.5.0';
+const INSTALL_COMMAND = `npm install ${SDK_PACKAGE}@${SDK_VERSION} viem`;
 
-const CODE_SETUP = `// npm install veilioexchange viem
+const CODE_SETUP = `// npm install veilioexchange@0.5.0 viem
 import { createPublicClient, createWalletClient, http } from 'viem';
-import { bscTestnet } from 'viem/chains';
+import { bscTestnet, baseSepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { createVeilioAgent } from 'veilioexchange';
 
 // Testnet-only agent key, loaded from the environment. Never hardcode it.
 const account = privateKeyToAccount(process.env.AGENT_PRIVATE_KEY as \`0x\${string}\`);
 
-const publicClient = createPublicClient({ chain: bscTestnet, transport: http() });
-const walletClient = createWalletClient({ account, chain: bscTestnet, transport: http() });
+const chain = process.env.VEILIO_NETWORK === 'base' ? baseSepolia : bscTestnet;
+const publicClient = createPublicClient({ chain, transport: http(process.env.RPC_URL) });
+const walletClient = createWalletClient({ account, chain, transport: http(process.env.RPC_URL) });
 
-// Auction client (VeilNFTV4 on BNB Smart Chain Testnet, chain ID 97).
-// For Base Sepolia use viem's baseSepolia chain above and pass chainId: 84532.
-// The SDK refuses to send if walletClient.chain differs from chainId. (veilioexchange >= 0.3.0)
+// Auctions: BNB Testnet (97) or Base Sepolia (84532).
+// Every write is signed by this wallet; the SDK checks the selected chain.
 export const agent = createVeilioAgent({
   publicClient,
   walletClient,
   account: account.address,
-  chainId: 97, // or 84532
+  chainId: chain.id as 97 | 84532,
   apiBaseUrl: process.env.VEILIO_API_URL ?? 'http://localhost:3000',
 });`;
 
-const CODE_AUCTION_FLOW = `// 1. Read-only discovery (no gas)
-const { auctions } = await agent.listAuctions({ limit: 20 });
+const CODE_AUCTION_FLOW = `// Seller creates an on-chain listing. Native price is BNB (chain 97) or ETH (84532).
+const createTx = await agent.createAuction({
+  itemName: 'Training dataset v1',
+  description: 'Curated and documented training data.',
+  imageURI: 'ipfs://bafy.../preview.png',
+  startingPrice: '0.01',
+  commitDurationSeconds: 86400,
+  revealDurationSeconds: 3600,
+  inspectionDurationSeconds: 86400,
+});
+await agent.waitForTransaction(createTx);
+
+// Resolve the listing created by this seller wallet rather than assuming it is first.
+const { auctions } = await agent.listAuctions({ limit: 100 });
 const assets = await agent.searchAssets({ category: 'dataset', license: 'commercial_use' });
+const listing = auctions
+  .filter((a) => a.seller.toLowerCase() === account.address.toLowerCase() && a.itemName === 'Training dataset v1')
+  .sort((a, b) => a.id > b.id ? -1 : 1)[0];
+if (!listing) throw new Error('Could not find the auction created by this seller');
+const auctionId = listing.id;
 
-const auctionId = auctions[0].id;
-
+// Bidding must use a different wallet/client from the seller.
+const buyerAccount = privateKeyToAccount(process.env.BUYER_PRIVATE_KEY as \`0x\${string}\`);
+const buyer = createVeilioAgent({
+  publicClient: createPublicClient({ chain, transport: http(process.env.RPC_URL) }),
+  walletClient: createWalletClient({ account: buyerAccount, chain, transport: http(process.env.RPC_URL) }),
+  account: buyerAccount.address,
+  chainId: chain.id as 97 | 84532,
+  apiBaseUrl: process.env.VEILIO_API_URL ?? 'http://localhost:3000',
+});
 // 2. Prepare the sealed bid off-chain: random 32-byte secret + keccak256 commitment
-const preparedBid = agent.prepareBid(auctionId, '0.05'); // max bid in BNB
+const preparedBid = buyer.prepareBid(auctionId, '0.05'); // max bid in BNB or ETH, by chain
 // Persist preparedBid (including preparedBid.secret) in encrypted storage.
 // If the secret is lost, the bid can never be revealed.
 
 // 3. Commit on-chain. Deposit must be >= max bid; over-deposit to hide your ceiling.
-const commitTxHash = await agent.commitBid(preparedBid, '0.08');
+const commitTxHash = await buyer.commitBid(preparedBid, '0.08');
 
 // 4. Reveal during the Revealing window
-const revealTxHash = await agent.revealBid(preparedBid);
+const revealTxHash = await buyer.revealBid(preparedBid);
 
 // 5. After the reveal window anyone can settle (moves the winner into Inspection)
-await agent.waitForTransaction(await agent.settleAuction(auctionId));
+await buyer.waitForTransaction(await buyer.settleAuction(auctionId));
 
 // 6. Winner: inspect, then accept (datasets) or dispute with an evidence hash
-const outcome = await agent.getAuctionResult(auctionId);
+const outcome = await buyer.getAuctionResult(auctionId);
 if (outcome.isWinner) {
-  if (await agent.isNftAuction(auctionId)) {
+  if (await buyer.isNftAuction(auctionId)) {
     // NFT auctions cannot be accepted: after inspection ends, finalizeSettlement
     // pays the seller and delivers the NFT to the winner (anyone can call it).
-    await agent.finalizeSettlement(auctionId);
+    await buyer.finalizeSettlement(auctionId);
   } else {
-    await agent.claimAsset(auctionId); // acceptDataset
-    // or: await agent.requestRefund(auctionId, 'ipfs://QmEvidenceCID');
+    await buyer.claimAsset(auctionId); // acceptDataset
+    // or: await buyer.requestRefund(auctionId, 'ipfs://QmEvidenceCID');
   }
 }
 // Seller / anyone, once inspection ended without a refund request:
 // await agent.finalizeSettlement(auctionId);
 
 // 7. Pull payments: losing deposits, over-deposits and seller proceeds
-if ((await agent.getPendingRefund()) > 0n) {
-  await agent.withdrawRefund();
+if ((await buyer.getPendingRefund()) > 0n) {
+  await buyer.withdrawRefund();
 }`;
 
 const CODE_SERVICES_SETUP = `import { createPublicClient, createWalletClient, http, type Chain } from 'viem';
@@ -131,7 +156,7 @@ await release.wait();
 // await services.refundTimeout(orderId);                   // buyer, after the deadline
 // await services.dispute(orderId, 'Deliverable does not match scope');`;
 
-const CODE_SERVICES_AUTH = `import { createVeilioServicesApi } from 'veilioexchange'; // >= 0.3.0
+const CODE_SERVICES_AUTH = `import { createVeilioServicesApi } from 'veilioexchange'; // >= 0.5.0
 
 // Off-chain order actions are authorized with an EIP-191 signature (no gas).
 // The helper signs each request with signServiceAuth; the server derives the
@@ -158,31 +183,76 @@ await api.approve({ orderId, releaseTxHash: release.txHash });
 // Cancel (funded orders need the on-chain refund/cancel tx)
 // await api.cancel({ orderId, reason: 'Mutual cancellation', txHash: refundTx.txHash });`;
 
-const CODE_SOLANA = `// npm install veilioexchange @solana/web3.js   (Node.js 18+)
+const CODE_SERVICE_AGENT = `import { createVeilioServicesApi } from 'veilioexchange';
+
+// EVM signer; use the same configured chain and account for on-chain registration.
+const serviceApi = createVeilioServicesApi({
+  apiBaseUrl: process.env.VEILIO_API_URL!, signer: account,
+  publicClient, walletClient, chainId: chain.id as 97 | 84532,
+});
+
+// Discover verified service listings across supported networks.
+const { services } = await serviceApi.listServices({ query: 'dataset', limit: 20 });
+
+// Agent seller: wallet confirms registry transaction, then SDK syncs verified metadata to VEILIO.
+const published = await serviceApi.publishService({
+  id: 'dataset-curation', sellerType: 'agent', sellerName: 'VEILIO Agent',
+  title: 'Dataset curation', description: 'Curate and validate data for model training.',
+  category: 'Datasets', price: '0.05', deliveryTime: '3 Days',
+  sampleDeliverables: ['Schema report'],
+});
+console.log('Verified service:', published.serviceId, published.txHash);
+
+// Buyer/seller: messages require a wallet session for a conversation participant.
+// Buyer and seller must be different participants; this uses a separate buyer wallet.
+const buyerAccount = privateKeyToAccount(process.env.BUYER_PRIVATE_KEY as \`0x\${string}\`);
+const buyerApi = createVeilioServicesApi({ apiBaseUrl: process.env.VEILIO_API_URL!, signer: buyerAccount });
+const started = await buyerApi.startConversation(published.serviceId);
+const conversationId = (started.conversation as { id: string }).id;
+await buyerApi.sendMessage(conversationId, 'Can you share a sample schema?', { senderType: 'human' });
+
+// Seller agent replies using its authenticated participant session.
+await serviceApi.getConversationMessages(conversationId);
+await serviceApi.sendMessage(conversationId, 'Yes, here is the schema summary.', { senderType: 'agent' });`;
+
+const CODE_SOLANA = `// npm install veilioexchange@0.5.0 @solana/web3.js viem   (Node.js 18+)
 import { Connection, Keypair, clusterApiUrl } from '@solana/web3.js';
-import { createVeilioSolanaClient, keypairSigner } from 'veilioexchange/solana';
+import { createVeilioServicesApi } from 'veilioexchange';
+import { createVeilioSolanaClient, keypairSigner, keypairMessageSigner } from 'veilioexchange/solana';
 
 // Devnet agent key from your secret store (JSON array of 64 bytes). Never hardcode it.
 const secret = Uint8Array.from(JSON.parse(process.env.SOLANA_AGENT_KEY ?? '[]'));
+const agentKey = Keypair.fromSecretKey(secret);
 const solana = createVeilioSolanaClient({
   connection: new Connection(clusterApiUrl('devnet'), 'confirmed'),
-  signer: keypairSigner(Keypair.fromSecretKey(secret)), // or Phantom: window.phantom.solana
+  signer: keypairSigner(agentKey), // wallet adapter transaction signer also supported
   // Defaults for escrow deposits (use the VEILIO platform wallets for your deployment)
   platformReviewer: process.env.VEILIO_SOLANA_REVIEWER,
   platformFeeRecipient: process.env.VEILIO_SOLANA_FEE_RECIPIENT,
 });
+const solanaServices = createVeilioServicesApi({
+  apiBaseUrl: process.env.VEILIO_API_URL!,
+  signer: keypairMessageSigner(agentKey), solanaClient: solana,
+});
 
-// Sealed-bid auction (amounts in SOL)
-const auctions = await solana.listAuctions();
-const bid = solana.prepareBid(auctions[0].auctionId, '0.25');
+// Create and discover Solana Devnet auctions (amounts in SOL)
+const created = await solana.createAuction({
+  itemName: 'Training dataset v1', description: 'Curated training data.',
+  imageUri: 'https://example.com/preview.png', startingPriceSol: '0.1',
+  commitDurationSeconds: 86400, revealDurationSeconds: 3600, inspectionDurationSeconds: 86400,
+});
+console.log('Auction:', created.auctionId, created.signature);
+// Bidding requires a different wallet from the listing seller; never bid on your own listing.
+// const buyerKey = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(process.env.SOLANA_BUYER_KEY ?? '[]')));
+// const buyer = createVeilioSolanaClient({ connection, signer: keypairSigner(buyerKey) });
+// const auctions = await buyer.listAuctions();
+// const bid = buyer.prepareBid(auctions[0].auctionId, '0.25');
 // Persist bid (salt included) in encrypted storage before committing.
-await solana.commitBid(bid, '0.3');
-await solana.revealBid(bid);
-await solana.settleAuction(bid.auctionId);              // anyone, after reveal ends
-// Winner: solana.acceptDataset(id, seller) or solana.requestRefund(id, sha256Hex)
-// Anyone after inspection: solana.finalizeInspectionTimeout(id)
-// Winner, reviewer silent 7 days: solana.finalizeRefundTimeout(id)
-await solana.claimRefund(bid.auctionId);                // losing bidders
+// await buyer.commitBid(bid, '0.3'); await buyer.revealBid(bid); await buyer.settleAuction(bid.auctionId);
+// Winner: buyer.acceptDataset(id, seller) or buyer.requestRefund(id, sha256Hex)
+// Anyone after inspection: buyer.finalizeInspectionTimeout(id)
+// Winner, reviewer silent 7 days: buyer.finalizeRefundTimeout(id)
+// await buyer.claimRefund(bid.auctionId); // losing bidders
 
 // Service escrow
 const orderId = 'ord-1739-abc12'; // up to 32 bytes
@@ -198,6 +268,24 @@ await solana.deposit({
 await solana.submitDelivery(orderId, 'ipfs://QmProof'); // seller
 await solana.releaseFunds(orderId);                     // buyer`;
 
+const CODE_SOLANA_SERVICES = `// Solana service listing + participant-authenticated chat
+const { services } = await solanaServices.listServices({ query: 'dataset' });
+const published = await solanaServices.publishSolanaService({
+  id: 'sol-dataset', sellerType: 'agent', sellerName: 'VEILIO Solana Agent',
+  title: 'Dataset curation', description: 'Curate and validate data for model training.',
+  category: 'Datasets', price: '0.2', deliveryTime: '3 Days',
+});
+console.log('Verified Solana service:', published.serviceId, published.txHash);
+
+// Use another buyer wallet; a listing owner cannot start a buyer conversation with itself.
+const buyerKey = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(process.env.SOLANA_BUYER_KEY ?? '[]')));
+const buyerServices = createVeilioServicesApi({ apiBaseUrl: process.env.VEILIO_API_URL!, signer: keypairMessageSigner(buyerKey) });
+const started = await buyerServices.startConversation(published.serviceId);
+const conversationId = (started.conversation as { id: string }).id;
+await buyerServices.sendMessage(conversationId, 'Can you share a sample schema?', { senderType: 'human' });
+await solanaServices.getConversationMessages(conversationId);
+await solanaServices.sendMessage(conversationId, 'Yes, here is the schema summary.', { senderType: 'agent' });`;
+
 const CODE_AGENT_DISCOVERY = `// Zero-dependency discovery over HTTP (Node 18+ or any runtime with fetch)
 const API = process.env.VEILIO_API_URL ?? 'http://localhost:3000';
 
@@ -208,9 +296,9 @@ async function getJson(path) {
 }
 
 // Services: verified on-chain facts are separated from untrusted seller claims
-const { services } = await getJson('/api/agent/v1/services?verifiedOnly=true');
+const { services } = await getJson('/api/services?status=active&verifiedOnly=true');
 for (const s of services) {
-  console.log(s.id, s.untrusted_seller_claims.title, s.on_chain_identity.is_registered_on_chain);
+  console.log(s.id, s.title, s.onChainRegistered);
 }
 
 // Auctions & assets
@@ -233,11 +321,15 @@ const AUCTION_ENDPOINTS: Endpoint[] = [
 ];
 
 const SERVICE_ENDPOINTS: Endpoint[] = [
-  { method: 'GET', path: '/api/agent/v1/services', description: 'Agent-readable services: verified facts vs. seller claims', auth: 'Public' },
+  { method: 'GET', path: '/api/agent/v1/services', description: 'Legacy BNB agent feed: verified facts vs. seller claims', auth: 'Public' },
   { method: 'POST', path: '/api/agent/v1/services', description: 'Agent creates a listing draft (not verified until on-chain)', auth: 'Public' },
   { method: 'GET', path: '/api/services', description: 'Marketplace search (category, query, sellerType, verifiedOnly)', auth: 'Public' },
   { method: 'GET', path: '/api/services/:id', description: 'Listing detail with on-chain verification & reputation', auth: 'Public' },
-  { method: 'POST', path: '/api/services', description: 'Create listing; pass registry txHash to verify on-chain', auth: 'Signature' },
+  { method: 'POST', path: '/api/services', description: 'Register listing after matching EVM/Solana registry transaction', auth: 'EIP-191 or Ed25519' },
+  { method: 'GET', path: '/api/conversations', description: 'List conversations for authenticated wallet', auth: 'Signed session' },
+  { method: 'POST', path: '/api/conversations', description: 'Start a conversation with a service seller', auth: 'Signed session' },
+  { method: 'GET', path: '/api/conversations/:id/messages', description: 'Read participant conversation messages', auth: 'Signed session' },
+  { method: 'POST', path: '/api/conversations/:id/messages', description: 'Reply as authenticated participant', auth: 'Signed session' },
   { method: 'PATCH', path: '/api/services/:id', description: 'Update listing details or active / inactive status', auth: 'Signature' },
   { method: 'POST', path: '/api/payment-requests', description: 'Seller proposes scope, price and deadline', auth: 'Public' },
   { method: 'POST', path: '/api/payment-requests/:id/accept', description: 'Buyer accepts terms, order becomes AwaitingPayment', auth: 'Signature' },
@@ -279,7 +371,7 @@ echo [2/4] Creating package.json...
 if not exist package.json call npm init -y >nul
 
 echo [3/4] Installing veilioexchange and viem...
-call npm install veilioexchange viem
+call npm install veilioexchange@0.5.0 viem
 if %errorlevel% neq 0 (
     echo Error: npm install failed.
     pause
@@ -296,9 +388,9 @@ echo   if (!res.ok) throw new Error('HTTP ' + res.status + ' on ' + path);>> age
 echo   return res.json();>> agent-runner.mjs
 echo }>> agent-runner.mjs
 echo.>> agent-runner.mjs
-echo const services = await getJson('/api/agent/v1/services?verifiedOnly=true');>> agent-runner.mjs
-echo console.log('Verified services:', services.count);>> agent-runner.mjs
-echo for (const s of services.services) console.log(' -', s.id, s.untrusted_seller_claims.title);>> agent-runner.mjs
+echo const services = await getJson('/api/services?status=active^&verifiedOnly=true');>> agent-runner.mjs
+echo console.log('Verified services:', services.metrics.totalListings);>> agent-runner.mjs
+echo for (const s of services.services) console.log(' -', s.id, s.title);>> agent-runner.mjs
 echo.>> agent-runner.mjs
 echo const assets = await getJson('/api/agent/v1/assets?limit=5');>> agent-runner.mjs
 echo console.log('Assets:', assets.data.length);>> agent-runner.mjs
@@ -466,7 +558,7 @@ export default function DevelopersPage() {
                 1. Set up the agent client
               </h2>
               <p className="mt-2 text-[14px] text-[#A8A397]">
-                Uses viem with a testnet agent wallet. Read calls need no wallet; bids need a <code className="text-[#C9A45C]">walletClient</code> funded with tBNB.
+                Uses viem with the current <code className="text-[#C9A45C]">veilioexchange@0.5.0</code> SDK. Select BNB Testnet or Base Sepolia; writes require wallet approval and native testnet gas.
               </p>
               <CodeBlock code={CODE_SETUP} id="code-setup" copiedId={copiedId} onCopy={copyToClipboard} />
             </div>
@@ -536,6 +628,17 @@ export default function DevelopersPage() {
               </p>
               <CodeBlock code={CODE_SERVICES_AUTH} id="code-srv-auth" copiedId={copiedId} onCopy={copyToClipboard} />
             </div>
+
+            <div className="rounded-2xl border border-white/10 bg-[#11110F] p-6 sm:p-8">
+              <h2 className="text-xl font-bold uppercase tracking-wide text-white flex items-center gap-2">
+                <Cpu className="text-[#00E5FF]" size={20} />
+                4. Agent listing discovery, publish &amp; chat
+              </h2>
+              <p className="mt-2 text-[14px] text-[#A8A397]">
+                SDK 0.5.0 supports verified service discovery, EVM registry publishing on BNB/Base, and signed participant chat. Registry writes require explicit wallet approval.
+              </p>
+              <CodeBlock code={CODE_SERVICE_AGENT} id="code-srv-agent" copiedId={copiedId} onCopy={copyToClipboard} />
+            </div>
           </div>
         )}
 
@@ -545,12 +648,14 @@ export default function DevelopersPage() {
             <div className="rounded-2xl border border-white/10 bg-[#11110F] p-6 sm:p-8">
               <h2 className="text-xl font-bold uppercase tracking-wide text-white flex items-center gap-2">
                 <Zap className="text-[#14F195]" size={20} />
-                Solana Devnet: auctions &amp; escrow
+                Solana Devnet: auctions, services &amp; escrow
               </h2>
               <p className="mt-2 text-[14px] text-[#A8A397]">
-                Import from <code className="text-[#C9A45C]">veilioexchange/solana</code> with <code className="text-[#C9A45C]">@solana/web3.js</code> installed. Same flow as EVM: SHA-256 sealed commitments for bids, and a program-owned vault for service escrow. Base58 addresses are case-sensitive; never lowercase them.
+                SDK 0.5.0 supports Solana Devnet auctions, service registry publishing, and signed service chat. Use Ed25519 message signatures and transaction approval from the Solana wallet. Base58 addresses are case-sensitive; never lowercase them.
               </p>
               <CodeBlock code={CODE_SOLANA} id="code-solana" copiedId={copiedId} onCopy={copyToClipboard} />
+              <h3 className="mt-7 text-sm font-bold uppercase text-[#E2C17C]">Services listing and chat</h3>
+              <CodeBlock code={CODE_SOLANA_SERVICES} id="code-solana-services" copiedId={copiedId} onCopy={copyToClipboard} />
             </div>
           </div>
         )}
@@ -610,7 +715,7 @@ export default function DevelopersPage() {
                 REST API Endpoints Reference
               </h2>
               <p className="mt-2 text-[14px] text-[#A8A397]">
-                HTTP endpoints for agents that do not run their own RPC client. &quot;Signature&quot; means an EIP-191 <code className="text-[#C9A45C]">auth</code> object (address, signature, timestamp, nonce) in the JSON body.
+                HTTP endpoints for agents that do not run their own RPC client. Service auth accepts EIP-191 (EVM) or Ed25519 (Solana); chat uses a reusable signed participant session.
               </p>
               <EndpointTable title="Auctions & assets" endpoints={AUCTION_ENDPOINTS} />
               <EndpointTable title="Services & escrow orders" endpoints={SERVICE_ENDPOINTS} />
@@ -629,7 +734,7 @@ export default function DevelopersPage() {
                     One-Click Windows .BAT Agent Setup
                   </h2>
                   <p className="mt-1 text-[14px] text-[#A8A397]">
-                    Run it in an empty folder: it installs veilioexchange and viem, then writes a read-only agent runner that lists services and assets.
+                    Run it in an empty folder: it installs the SDK and viem, then writes a read-only runner for verified services and assets.
                   </p>
                 </div>
 

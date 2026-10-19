@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, createPrivateKey, randomBytes, sign as signEd25519 } from 'node:crypto';
 import {
   Connection,
   Keypair,
@@ -9,11 +9,14 @@ import {
   type Commitment,
 } from '@solana/web3.js';
 import { VeilioSdkError } from '../errors.js';
+import type { MessageSigner } from '../auth.js';
+import type { Hex } from 'viem';
 import {
   DEFAULT_SOLANA_AUCTION_PROGRAM_ID,
   computeSealedBidCommitment,
   SolanaAuctionState,
   createAcceptDatasetInstruction,
+  createCreateAuctionInstruction,
   createClaimRefundInstruction,
   createCommitBidInstruction,
   createFinalizeInspectionTimeoutInstruction,
@@ -44,12 +47,46 @@ import {
   type DecodedSolanaEscrowConfig,
   type DecodedSolanaEscrowOrder,
 } from './escrow.js';
-import { encodeBase58, getAnchorDiscriminator, type SolanaCompiledInstruction } from './registry.js';
+import {
+  createRegisterServiceInstruction,
+  DEFAULT_SOLANA_SERVICE_REGISTRY_PROGRAM_ID,
+  encodeBase58,
+  getAnchorDiscriminator,
+  type SolanaCompiledInstruction,
+} from './registry.js';
 
 /** Anything that can sign a legacy Transaction: a Phantom provider, a wallet adapter, or keypairSigner(). */
 export interface SolanaSigner {
   publicKey: PublicKey;
   signTransaction<T extends Transaction>(transaction: T): Promise<T>;
+}
+
+/** Adapts a Solana wallet-adapter/Phantom provider to the message signer used by Services API auth. */
+export function solanaMessageSigner(provider: {
+  publicKey: PublicKey;
+  signMessage(message: Uint8Array): Promise<Uint8Array | { signature: Uint8Array }>;
+}): MessageSigner {
+  return {
+    address: provider.publicKey.toBase58(),
+    async signMessage({ message }) {
+      const result = await provider.signMessage(Buffer.from(message, 'utf8'));
+      const signature = result instanceof Uint8Array ? result : result.signature;
+      if (signature.length !== 64) throw new Error(`Solana wallet returned a ${signature.length}-byte signature; expected 64 bytes.`);
+      return `0x${Buffer.from(signature).toString('hex')}` as Hex;
+    },
+  };
+}
+
+/** Ed25519 Services API signer for a local Solana keypair. Keep the keypair in a secure secret store. */
+export function keypairMessageSigner(keypair: Keypair): MessageSigner {
+  const pkcs8Prefix = Buffer.from('302e020100300506032b657004220420', 'hex');
+  const privateKey = createPrivateKey({ key: Buffer.concat([pkcs8Prefix, Buffer.from(keypair.secretKey.subarray(0, 32))]), format: 'der', type: 'pkcs8' });
+  return {
+    address: keypair.publicKey.toBase58(),
+    async signMessage({ message }) {
+      return `0x${signEd25519(null, Buffer.from(message, 'utf8'), privateKey).toString('hex')}` as Hex;
+    },
+  };
 }
 
 /** Wraps a Keypair (e.g. an agent's devnet key) as a SolanaSigner. */
@@ -68,6 +105,7 @@ export interface VeilioSolanaClientOptions {
   signer?: SolanaSigner;
   auctionProgramId?: string;
   escrowProgramId?: string;
+  serviceRegistryProgramId?: string;
   commitment?: Commitment;
   /**
    * Default dispute reviewer for `deposit()` when the input omits `reviewer`. Use the VEILIO
@@ -178,6 +216,7 @@ export function createVeilioSolanaClient(options: VeilioSolanaClientOptions) {
   const commitment = options.commitment ?? 'confirmed';
   const auctionProgramId = options.auctionProgramId ?? DEFAULT_SOLANA_AUCTION_PROGRAM_ID;
   const escrowProgramId = options.escrowProgramId ?? DEFAULT_SOLANA_SERVICE_ESCROW_PROGRAM_ID;
+  const serviceRegistryProgramId = options.serviceRegistryProgramId ?? DEFAULT_SOLANA_SERVICE_REGISTRY_PROGRAM_ID;
 
   function requireSigner(): SolanaSigner {
     if (!options.signer) {
@@ -235,6 +274,74 @@ export function createVeilioSolanaClient(options: VeilioSolanaClientOptions) {
       }
     }
     return auctions.sort((a, b) => Number(b.auctionId - a.auctionId));
+  }
+
+  /** Creates a Solana Devnet listing using the platform reviewer stored in AuctionConfig. */
+  async function createAuction(input: {
+    itemName: string;
+    description: string;
+    imageUri: string;
+    startingPriceSol: string;
+    commitDurationSeconds: number;
+    revealDurationSeconds: number;
+    inspectionDurationSeconds: number;
+  }): Promise<{ auctionId: string; signature: string }> {
+    const seller = requireSigner().publicKey.toBase58();
+    const config = await getAuctionConfig();
+    if (!config) throw new VeilioSdkError({ code: 'INVALID_CONFIG', message: 'Solana AuctionConfig is not initialized; VEILIO must initialize the reviewer config before listings can be created.' });
+    const auctions = await listAuctions();
+    const auctionId = auctions.reduce((max, item) => item.auctionId > max ? item.auctionId : max, 0n) + 1n;
+    if (await getAuction(auctionId)) throw new VeilioSdkError({ code: 'CONTRACT_ERROR', message: `Auction ID ${auctionId} is already in use; refresh and retry.` });
+    let startingPriceLamports: bigint;
+    try { startingPriceLamports = solToLamports(input.startingPriceSol); }
+    catch (cause) { throw new VeilioSdkError({ code: 'INVALID_INPUT', message: cause instanceof Error ? cause.message : 'Invalid starting SOL price.', cause }); }
+    let instruction: SolanaCompiledInstruction;
+    try {
+      instruction = createCreateAuctionInstruction({
+        programId: auctionProgramId, seller, reviewer: config.reviewer, auctionId,
+        itemName: input.itemName.trim(), description: input.description.trim(), imageUri: input.imageUri.trim(),
+        startingPriceLamports, commitDurationSeconds: input.commitDurationSeconds,
+        revealDurationSeconds: input.revealDurationSeconds, inspectionDurationSeconds: input.inspectionDurationSeconds,
+      });
+    } catch (cause) {
+      throw new VeilioSdkError({ code: 'INVALID_INPUT', message: cause instanceof Error ? cause.message : 'Invalid auction input.', cause });
+    }
+    const signature = await send(instruction);
+    return { auctionId: auctionId.toString(), signature };
+  }
+
+  /** Registers a verified service listing in the Solana Devnet service registry. */
+  async function registerService(input: {
+    id: string; sellerType: 'human' | 'agent'; sellerName: string; title: string;
+    description: string; category: string; price: string; deliveryTime: string;
+    sampleDeliverables?: string[]; metadataURI?: string;
+  }): Promise<{ signature: string; createdAt: number; metadataURI: string; metadataHash: `0x${string}` }> {
+    const seller = requireSigner().publicKey.toBase58();
+    if (!/^[A-Za-z0-9_-]{3,32}$/.test(input.id)) throw new VeilioSdkError({ code: 'INVALID_INPUT', message: 'Service id must be 3-32 characters: letters, numbers, _ or -.' });
+    if (!input.sellerName.trim() || input.title.trim().length < 5 || input.description.trim().length < 15 || !input.category.trim() || !input.deliveryTime.trim() || !Number.isFinite(Number(input.price)) || Number(input.price) <= 0) {
+      throw new VeilioSdkError({ code: 'INVALID_INPUT', message: 'Service requires sellerName, deliveryTime, title (5+ chars), description (15+ chars), category, and positive price.' });
+    }
+    const createdAt = Date.now();
+    const id = input.id.trim();
+    const canonicalMetadata = {
+      category: input.category.trim(), createdAt, currency: 'SOL', deliveryTime: input.deliveryTime.trim(),
+      description: input.description.trim(), id, price: String(Number(input.price)),
+      sampleDeliverables: (input.sampleDeliverables ?? []).map((item) => item.trim()).filter(Boolean),
+      seller, sellerName: input.sellerName.trim(), sellerType: input.sellerType,
+      title: input.title.trim(), version: '1.0.0',
+    };
+    const metadataHash = `0x${createHash('sha256').update(JSON.stringify(canonicalMetadata), 'utf8').digest('hex')}` as `0x${string}`;
+    const metadataURI = input.metadataURI?.trim() || `ipfs://QmServiceMeta-${id}`;
+    const serviceId = Buffer.alloc(32);
+    Buffer.from(id, 'utf8').copy(serviceId);
+    let instruction: SolanaCompiledInstruction;
+    try {
+      instruction = createRegisterServiceInstruction({ programId: serviceRegistryProgramId, seller, serviceId, metadataHash, metadataUri: metadataURI });
+    } catch (cause) {
+      throw new VeilioSdkError({ code: 'INVALID_INPUT', message: cause instanceof Error ? cause.message : 'Invalid Solana service metadata.', cause });
+    }
+    const signature = await send(instruction);
+    return { signature, createdAt, metadataURI, metadataHash };
   }
 
   function prepareBid(auctionId: bigint | number | string, maxBidSol: string): SolanaPreparedBid {
@@ -504,11 +611,14 @@ export function createVeilioSolanaClient(options: VeilioSolanaClientOptions) {
   }
 
   return {
+    address: options.signer?.publicKey.toBase58(),
     auctionProgramId,
     escrowProgramId,
     getAuctionConfig,
     getAuction,
     listAuctions,
+    createAuction,
+    registerService,
     prepareBid,
     commitBid,
     revealBid,

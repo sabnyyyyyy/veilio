@@ -3,7 +3,7 @@
 **Document Version:** 1.0.0  
 **Effective Date:** 2026-10-12  
 **Classification:** PUBLIC  
-**Target Environments:** BNB Smart Chain Testnet (Chain ID 97) & Cross-Chain Staging  
+**Target Environments:** BNB Smart Chain Testnet (Chain ID 97), Base Sepolia (84532), and Solana Devnet
 
 ---
 
@@ -47,19 +47,16 @@ The following capabilities are fully implemented in the current repository and v
 
 ---
 
-## 3. Experimental & In-Development Capabilities
+## 3. Additional Testnet and Cross-Chain Capabilities
 
-The following capabilities are in active architectural design and testnet staging:
+### 3.1 Base Sepolia (EVM Testnet)
+- Chain ID `84532` is configured for chain-aware auction, service registry, and service escrow actions in the SDK and app.
+- Base Sepolia transaction support is testnet-only; verify configured contract addresses and RPC responses before each deployment or submission.
 
-### 3.1 Chain-Neutral Adapter Architecture
-- Typed read/observation adapters handle EVM and Solana address, transaction ID, and finality differences.
-- BNB Testnet is the only network with a live VEILIO marketplace contract in this release.
-- Base Sepolia is RPC configuration only. It has no VEILIO auction or escrow deployment and cannot host marketplace transactions yet.
-
-### 3.2 Solana Devnet (Monitoring Only)
-- The app can check Solana Devnet RPC health and inspect transaction status.
-- No VEILIO auction or service-registry program is currently configured as deployed. Solana marketplace writes are disabled until a program is deployed, verified, and its program ID is configured.
-- Ed25519 wallet signatures are verified cryptographically by the adapter. Linking an identity does not move assets.
+### 3.2 Solana Devnet
+- The SDK and app support Solana Devnet auction, service registry, and service escrow instructions, plus Ed25519-authenticated service discovery and chat.
+- Auction, registry, and escrow program IDs are configurable; keep their deployed IDs aligned between the app and SDK.
+- Solana service escrow stores the buyer-selected reviewer and fee recipient in each order; sellers should verify the reviewer before starting work.
 
 ### 3.3 Cross-Chain Attestation (In Development)
 - Message schemas and verification components exist as development infrastructure. They do not move funds or make auctions settle across chains.
@@ -77,6 +74,6 @@ The following capabilities are in active architectural design and testnet stagin
 
 ## 5. Explicit Limitations & Disclaimers
 
-1. **Testnet Operation:** The platform currently operates on the BNB Smart Chain Testnet (Chain ID 97) for testing and development purposes. It has not been deployed to mainnet.
+1. **Testnet Operation:** The platform currently operates on BNB Smart Chain Testnet (97), Base Sepolia (84532), and Solana Devnet for testing and development. It has not been deployed to mainnet.
 2. **No Automatic Cross-Chain Asset Movement:** Cross-chain capabilities in Milestone 1 are strictly limited to status observation and attestation verification. No automatic token bridging or settlement occurs across chains.
 3. **Independent Audit Scope:** Automated security testing does not constitute a substitute for a comprehensive multi-firm manual audit prior to high-value mainnet deployment.

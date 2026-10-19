@@ -1,4 +1,6 @@
 import { VeilioSdkError } from './errors.js';
+import { pad, parseEventLogs, sha256, stringToHex, toHex, type Address, type Hex, type PublicClient, type WalletClient } from 'viem';
+import { VEILIO_DEPLOYMENTS } from './deployments.js';
 import {
   encodeServiceAuthHeader,
   isServiceSessionFresh,
@@ -15,7 +17,7 @@ import {
  * order status shown in the VEILIO app (`InProgress`, `InReview`, `Completed`, ...) only changes
  * when the API is told about it. Call the matching method here after each on-chain step.
  *
- * State-changing calls are signed per request with `signServiceAuth` (EIP-191 personal_sign,
+ * State-changing calls are signed per request with `signServiceAuth` (EIP-191 or Solana Ed25519,
  * nonce consumed by the server). Reads use a reusable 30-minute session (`signServiceSession`)
  * sent in the `x-veilio-auth` header; it is signed once and cached. The server derives the
  * network from the order itself, so no `network` field is ever sent.
@@ -23,11 +25,48 @@ import {
 export interface VeilioServicesApiOptions {
   /** e.g. "https://veilio.example". Trailing slashes are ignored. */
   apiBaseUrl: string;
-  /** Wallet that signs the auth message (a viem LocalAccount works). Must be the order's buyer/seller. */
+  /** EVM LocalAccount or Solana message signer. Must be the order/conversation participant. */
   signer: MessageSigner;
   /** Custom fetch (defaults to globalThis.fetch). */
   fetch?: typeof globalThis.fetch;
+  /** Required only for publishService; use clients on the same chain as the signer. */
+  publicClient?: PublicClient;
+  walletClient?: WalletClient;
+  /** 97 (BNB Testnet) or 84532 (Base Sepolia). Defaults to the wallet chain, then 97. */
+  chainId?: 97 | 84532;
+  /** Override the service registry deployment. */
+  registryAddress?: Address;
+  /** Solana client returned by createVeilioSolanaClient; required only for publishSolanaService. */
+  solanaClient?: {
+    address?: string;
+    registerService(input: PublishServiceInput): Promise<{ signature: string; createdAt: number; metadataURI: string; metadataHash: Hex }>;
+  };
 }
+
+export interface PublishServiceInput {
+  id: string;
+  sellerType: 'human' | 'agent';
+  sellerName: string;
+  title: string;
+  description: string;
+  category: string;
+  price: string;
+  deliveryTime: string;
+  sampleDeliverables?: string[];
+  /** Optional URI to metadata; default is a stable VEILIO URI. */
+  metadataURI?: string;
+}
+
+const serviceRegistryAbi = [
+  { type: 'function', name: 'registerService', stateMutability: 'nonpayable', inputs: [
+    { name: 'serviceId', type: 'bytes32' }, { name: 'metadataHash', type: 'bytes32' }, { name: 'metadataURI', type: 'string' },
+  ], outputs: [] },
+  { type: 'event', name: 'ServiceRegistered', anonymous: false, inputs: [
+    { name: 'serviceId', type: 'bytes32', indexed: true }, { name: 'seller', type: 'address', indexed: true },
+    { name: 'metadataHash', type: 'bytes32', indexed: false }, { name: 'metadataURI', type: 'string', indexed: false },
+    { name: 'timestamp', type: 'uint256', indexed: false },
+  ] },
+] as const;
 
 export interface NotifyDepositInput {
   /** VEILIO order ID (the `id` in /api/orders/{id}). */
@@ -184,6 +223,142 @@ export function createVeilioServicesApi(options: VeilioServicesApiOptions) {
     );
   }
 
+  /** Public/verified catalog discovery for agent tool implementations. */
+  async function listServices(input: { query?: string; category?: string; sellerType?: 'human' | 'agent' | 'all'; limit?: number } = {}) {
+    const params = new URLSearchParams();
+    if (input.query) params.set('query', input.query);
+    if (input.category) params.set('category', input.category);
+    if (input.sellerType) params.set('sellerType', input.sellerType);
+    params.set('status', 'active');
+    const res = await request(`${base}/api/services?${params.toString()}`, { method: 'GET' });
+    const result = await parse<{ success: boolean; services?: unknown[]; metrics?: unknown }>(res, 'list-services', 'catalog');
+    const limit = input.limit === undefined ? undefined : Math.min(Math.max(Math.trunc(input.limit), 1), 100);
+    return limit && result.services ? { ...result, services: result.services.slice(0, limit) } : result;
+  }
+
+  /** Buyer opens a conversation with the seller of a service. */
+  async function startConversation(serviceId: string) {
+    const id = requireOrderId(serviceId);
+    const res = await request(`${base}/api/conversations`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serviceId: id, buyerAddress: signer.address, auth: await getSession() }),
+    });
+    return parse<{ success: boolean; conversation: unknown }>(res, 'start-conversation', id);
+  }
+
+  /** Replies as the authenticated participant; server enforces participant identity and agent badge rules. */
+  async function sendMessage(conversationId: string, content: string, input: { senderType?: 'human' | 'agent'; paymentRequestId?: string } = {}) {
+    const id = requireOrderId(conversationId);
+    const message = String(content ?? '').trim();
+    if (!message) throw new VeilioSdkError({ code: 'INVALID_INPUT', message: 'Chat message cannot be empty.' });
+    const res = await request(`${base}/api/conversations/${encodeURIComponent(id)}/messages`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: message, senderId: signer.address, senderType: input.senderType ?? 'agent', ...(input.paymentRequestId ? { paymentRequestId: input.paymentRequestId } : {}), auth: await getSession() }),
+    });
+    return parse<{ success: boolean; message: unknown }>(res, 'send-message', id);
+  }
+
+  async function syncServiceListing(input: PublishServiceInput, txHash: Hex, createdAt: number, metadataURI?: string) {
+    const chainId = options.chainId ?? options.walletClient?.chain?.id ?? 97;
+    if (chainId !== 97 && chainId !== 84532) throw new VeilioSdkError({ code: 'CHAIN_MISMATCH', message: 'Service sync supports BNB Testnet (97) and Base Sepolia (84532).' });
+    const id = input.id.trim();
+    const uri = metadataURI?.trim() || input.metadataURI?.trim() || `veilio://services/${encodeURIComponent(id)}`;
+    const metadata = {
+      category: input.category.trim(), createdAt, currency: chainId === 97 ? 'BNB' : 'ETH',
+      deliveryTime: input.deliveryTime.trim(), description: input.description.trim(), id,
+      price: String(Number(input.price)), sampleDeliverables: (input.sampleDeliverables ?? []).map((x) => x.trim()).filter(Boolean),
+      seller: signer.address.toLowerCase(), sellerName: input.sellerName.trim(), sellerType: input.sellerType,
+      title: input.title.trim(), version: '1.0.0',
+    };
+    const metadataHash = sha256(toHex(JSON.stringify(metadata)));
+    const auth = await signServiceAuth(signer, 'create-service', id);
+    const res = await request(`${base}/api/services`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      ...metadata, sellerId: signer.address, txHash, metadataURI: uri, metadataHash, network: chainId === 97 ? 'bnb:97' : 'base:84532', auth,
+    }) });
+    try {
+      return { ...(await parse<Record<string, unknown>>(res, 'publish-service', id)), txHash, serviceId: id };
+    } catch (cause) {
+      if (cause instanceof VeilioSdkError) throw new VeilioSdkError({
+        code: cause.code,
+        message: `${cause.message} The registry transaction is already confirmed; retry syncServiceListing with the same input, txHash, createdAt, and metadataURI.`,
+        context: { ...cause.context, txHash, serviceId: id, createdAt, metadataURI: uri, metadataHash, network: chainId === 97 ? 'bnb:97' : 'base:84532' },
+        cause,
+      });
+      throw cause;
+    }
+  }
+
+  async function syncSolanaServiceListing(input: PublishServiceInput, signature: string, createdAt: number, metadataURI?: string) {
+    const id = input.id.trim();
+    const uri = metadataURI?.trim() || input.metadataURI?.trim() || `ipfs://QmServiceMeta-${id}`;
+    const metadata = {
+      category: input.category.trim(), createdAt, currency: 'SOL',
+      deliveryTime: input.deliveryTime.trim(), description: input.description.trim(), id,
+      price: String(Number(input.price)), sampleDeliverables: (input.sampleDeliverables ?? []).map((x) => x.trim()).filter(Boolean),
+      seller: signer.address, sellerName: input.sellerName.trim(), sellerType: input.sellerType,
+      title: input.title.trim(), version: '1.0.0',
+    };
+    const metadataHash = sha256(toHex(JSON.stringify(metadata)));
+    const auth = await signServiceAuth(signer, 'create-service', id);
+    const res = await request(`${base}/api/services`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      ...metadata, sellerId: signer.address, txHash: signature, metadataURI: uri, metadataHash, network: 'solana:devnet', auth,
+    }) });
+    try {
+      return { ...(await parse<Record<string, unknown>>(res, 'publish-solana-service', id)), txHash: signature, serviceId: id };
+    } catch (cause) {
+      if (cause instanceof VeilioSdkError) throw new VeilioSdkError({
+        code: cause.code,
+        message: `${cause.message} Solana registry transaction is already confirmed; retry syncSolanaServiceListing with the same input, signature, createdAt, and metadataURI.`,
+        context: { ...cause.context, txHash: signature, serviceId: id, createdAt, metadataURI: uri, metadataHash, network: 'solana:devnet' },
+        cause,
+      });
+      throw cause;
+    }
+  }
+
+  async function publishSolanaService(input: PublishServiceInput) {
+    const client = options.solanaClient;
+    if (!client) throw new VeilioSdkError({ code: 'INVALID_CONFIG', message: 'publishSolanaService requires a Solana client with a connected wallet signer.' });
+    if (!client.address || client.address !== signer.address) throw new VeilioSdkError({ code: 'UNAUTHORIZED', message: 'Solana registry signer and Services API message signer must be the same wallet.' });
+    const registered = await client.registerService(input);
+    return syncSolanaServiceListing(input, registered.signature, registered.createdAt, registered.metadataURI);
+  }
+
+  /** Registers a verified EVM service listing on-chain, waits for its event, then syncs it to VEILIO. */
+  async function publishService(input: PublishServiceInput) {
+    const wallet = options.walletClient;
+    const publicClient = options.publicClient;
+    if (!wallet || !publicClient) throw new VeilioSdkError({ code: 'WALLET_REQUIRED', message: 'publishService requires walletClient and publicClient.' });
+    const chainId = options.chainId ?? wallet.chain?.id;
+    if (chainId !== 97 && chainId !== 84532) throw new VeilioSdkError({ code: 'CHAIN_MISMATCH', message: 'publishService supports BNB Testnet (97) and Base Sepolia (84532).' });
+    if (wallet.chain && wallet.chain.id !== chainId) throw new VeilioSdkError({ code: 'CHAIN_MISMATCH', message: `Wallet chain ${wallet.chain.id} does not match Services registry chain ${chainId}.` });
+    if (!/^[A-Za-z0-9_-]{3,32}$/.test(input.id)) throw new VeilioSdkError({ code: 'INVALID_INPUT', message: 'Service id must be 3-32 characters: letters, numbers, _ or -.' });
+    if (input.title.trim().length < 5 || input.description.trim().length < 15 || !Number.isFinite(Number(input.price)) || Number(input.price) <= 0 || !input.category.trim() || !input.sellerName.trim() || !input.deliveryTime.trim()) {
+      throw new VeilioSdkError({ code: 'INVALID_INPUT', message: 'Service requires sellerName, deliveryTime, title (5+ chars), description (15+ chars), category, and positive price.' });
+    }
+    const createdAt = Date.now();
+    const seller = signer.address;
+    const metadata = {
+      category: input.category.trim(), createdAt, currency: chainId === 97 ? 'BNB' : 'ETH',
+      deliveryTime: input.deliveryTime.trim(), description: input.description.trim(), id: input.id.trim(),
+      price: String(Number(input.price)), sampleDeliverables: (input.sampleDeliverables ?? []).map((x) => x.trim()).filter(Boolean),
+      seller: seller.toLowerCase(), sellerName: input.sellerName.trim(), sellerType: input.sellerType,
+      title: input.title.trim(), version: '1.0.0',
+    };
+    const metadataHash = sha256(toHex(JSON.stringify(metadata)));
+    const metadataURI = input.metadataURI?.trim() || `veilio://services/${encodeURIComponent(input.id)}`;
+    const serviceId = pad(stringToHex(input.id), { size: 32, dir: 'right' });
+    const registry = options.registryAddress ?? (chainId === 97 ? VEILIO_DEPLOYMENTS.bnbTestnet.serviceRegistry : VEILIO_DEPLOYMENTS.baseSepolia.serviceRegistry);
+    const account = typeof wallet.account === 'string' ? wallet.account : wallet.account?.address;
+    if (!account || account.toLowerCase() !== seller.toLowerCase()) throw new VeilioSdkError({ code: 'UNAUTHORIZED', message: 'Registry transaction wallet must match the Services API signer.' });
+    const txHash = await wallet.writeContract({ address: registry, abi: serviceRegistryAbi, functionName: 'registerService', args: [serviceId, metadataHash, metadataURI], account: wallet.account, chain: wallet.chain } as Parameters<WalletClient['writeContract']>[0]);
+    const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+    if (receipt.status !== 'success') throw new VeilioSdkError({ code: 'TRANSACTION_REVERTED', message: `Service registry transaction ${txHash} reverted.`, context: { txHash, serviceId: input.id } });
+    const event = parseEventLogs({ abi: serviceRegistryAbi, logs: receipt.logs, eventName: 'ServiceRegistered' }).find((log) => log.args.serviceId.toLowerCase() === serviceId.toLowerCase() && log.args.seller.toLowerCase() === seller.toLowerCase() && log.args.metadataHash.toLowerCase() === metadataHash.toLowerCase() && log.args.metadataURI === metadataURI);
+    if (!event) throw new VeilioSdkError({ code: 'CONTRACT_ERROR', message: `Confirmed registry transaction ${txHash} did not emit the expected ServiceRegistered event.`, context: { txHash, serviceId: input.id } });
+    return syncServiceListing(input, txHash, createdAt, metadataURI);
+  }
+
   // ------------------------------------------------------- signed order actions
   async function post<T = unknown>(
     action: string,
@@ -285,5 +460,12 @@ export function createVeilioServicesApi(options: VeilioServicesApiOptions) {
     getPaymentRequest,
     listConversations,
     getConversationMessages,
+    listServices,
+    startConversation,
+    sendMessage,
+    publishService,
+    syncServiceListing,
+    syncSolanaServiceListing,
+    publishSolanaService,
   };
 }

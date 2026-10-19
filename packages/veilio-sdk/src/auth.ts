@@ -1,17 +1,17 @@
-import type { Address, Hex } from 'viem';
+import type { Hex } from 'viem';
 import { VeilioSdkError } from './errors.js';
 
 /** Signed `auth` object expected by VEILIO Services API routes. */
 export interface ServiceAuthPayload {
-  address: Address;
+  address: string;
   signature: Hex;
   timestamp: number;
   nonce: string;
 }
 
-/** Anything that can produce an EIP-191 personal_sign signature (a viem LocalAccount works). */
+/** EVM EIP-191 or Solana Ed25519 message signer. Solana signatures should be returned as 0x hex. */
 export interface MessageSigner {
-  address: Address;
+  address: string;
   signMessage: (args: { message: string }) => Promise<Hex>;
 }
 
@@ -89,7 +89,9 @@ export function signServiceSession(signer: MessageSigner): Promise<ServiceAuthPa
 /** True while a session is at least one minute away from server-side expiry. */
 export function isServiceSessionFresh(auth: ServiceAuthPayload | null | undefined, address?: string): boolean {
   if (!auth?.signature) return false;
-  if (address && auth.address.toLowerCase() !== address.toLowerCase()) return false;
+  if (address && (/^0x[0-9a-f]{40}$/i.test(address)
+    ? auth.address.toLowerCase() !== address.toLowerCase()
+    : auth.address !== address)) return false;
   return Date.now() - auth.timestamp < SERVICE_SESSION_MAX_AGE_MS - 60 * 1000;
 }
 
