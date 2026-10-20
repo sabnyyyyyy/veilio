@@ -1,77 +1,118 @@
 # VEILIO
 
-VEILIO is a marketplace for **digital assets and expert services**. It combines sealed-bid auctions, encrypted asset delivery, and smart-contract escrow so buyers, sellers, and software agents can discover opportunities and complete transactions with clear on-chain records.
+**VEILIO is a testnet marketplace for digital assets and expert services.** People and software agents can discover listings, negotiate service work, bid on assets, and settle purchases through smart-contract escrow.
 
-The product has two connected markets:
+The product has two markets:
 
-- **Assets:** sellers list datasets and other digital assets; buyers bid privately, inspect the winning asset, and accept or dispute it.
-- **Services:** providers list human- or agent-labeled services; buyers agree on scope, price, and deadline, fund an escrow, then release payment after delivery or use the dispute/refund path.
+- **Digital assets:** sellers list datasets and other files. Buyers submit sealed bids, and the winner inspects the asset before accepting it or following the dispute path.
+- **Services:** providers publish a scope, price, and delivery terms. Buyers discuss the work with the provider, fund an escrow order, and release payment after delivery—or use the available refund and dispute paths.
 
-The web app provides the marketplace experience. The `veilioexchange@0.5.1` TypeScript SDK and agent REST API let developers discover and create auctions, publish verified services, and use participant-authenticated service chat. Supported testnets are BNB Chain (97), Base Sepolia (84532), and Solana Devnet. The SDK source lives in [`packages/veilio-sdk`](packages/veilio-sdk); agent API documentation is in [`docs/agent-api.md`](docs/agent-api.md).
+The web app is the marketplace interface. Developers can use the TypeScript SDK, REST API, and the separate agent-tools package. Supported deployments are testnets only; support varies by flow as shown below.
 
-Current integrations are testnet-only: BNB Smart Chain Testnet, Base Sepolia, and Solana Devnet. Network and feature support varies by flow; see the [SDK guide](packages/veilio-sdk/README.md).
+## Networks and packages
 
-## How the marketplace works
+| Network | Auctions | Service registry and chat | Service escrow | Network ID |
+| --- | --- | --- | --- | --- |
+| BNB Smart Chain Testnet | EVM SDK | EVM registry and signed API | EVM escrow | `97` |
+| Base Sepolia | EVM SDK | EVM registry and signed API | EVM escrow | `84532` |
+| Solana Devnet | Solana SDK | Solana registry and signed API | Solana program | Devnet |
 
-### Dataset and digital-asset auction
+Packages:
 
-```mermaid
-flowchart LR
-    A[Seller prepares asset] --> B{Asset type?}
-    B -- Dataset or file --> C[Encrypt files and upload privately]
-    B -- NFT --> D[Approve and escrow NFT]
-    C --> E[Publish listing and auction terms]
-    D --> E
-    E --> F[Buyer or agent discovers and evaluates listing]
-    F --> G[Prepare bid amount and secret locally]
-    G --> H[Commit hash and deposit during bidding]
-    H --> I[Reveal bid during reveal window]
-    I --> J[Settle after reveal ends]
-    J --> K{Winner?}
-    K -- No --> L[Eligible bidders withdraw refunds]
-    K -- Yes --> M[Winner inspects asset]
-    M --> N{Asset type and decision?}
-    N -- Dataset accepted --> O[Complete settlement and release data access]
-    N -- NFT inspection passes --> P[Finalize and deliver NFT]
-    N -- Dispute --> Q[Reviewer resolves under contract rules]
-```
+- [`veilioexchange`](packages/veilio-sdk) — TypeScript clients for auctions, service registry/chat API, and escrow. Install with `npm install veilioexchange@0.5.1 viem`; Solana integrations also use `@solana/web3.js` and import from `veilioexchange/solana`.
+- [`veilio-agent-tools`](packages/veilio-agent-tools) — agent-facing schemas and guarded handlers for bidder and service-buyer actions. Install with `npm install veilio-agent-tools veilioexchange`.
 
-The commitment hides the **bid amount** until reveal; the commitment, bidder address, and deposit remain public on-chain. The bid secret is generated locally and must be stored securely until reveal. VEILIO encrypts private asset files and checks access against the winning wallet and completed on-chain state. Public listing fields—such as title, description, price, and cover reference—are still visible to everyone.
+`veilio-agent-tools` does not include a ready-made adapter for a specific agent framework or an MCP server. The integrating developer supplies an `operations` bridge to the SDK clients, a real human-approval flow, and durable encrypted storage for sealed-bid secrets. Read its [package guide](packages/veilio-agent-tools/README.md) before integrating it. The packages do not receive or manage users' private keys.
 
-### Service marketplace and escrow
+## User flows
+
+### Digital-asset auction
 
 ```mermaid
-flowchart LR
-    A[Provider publishes service] --> B[Buyer discovers provider]
-    B --> C[Agree scope, price, and deadline]
-    C --> D[Create a unique order]
-    D --> E[Buyer deposits funds into on-chain escrow]
-    E --> F[Provider performs work]
-    F --> G[Provider submits delivery reference]
-    G --> H{Buyer review}
-    H -- Approve --> I[Release funds to provider]
-    H -- Dispute --> J[Reviewer resolves and splits funds]
-    E -- Deadline passes before delivery --> K[Buyer can request timeout refund]
+flowchart TD
+    A[Seller prepares digital asset] --> B[Upload private file and publish listing details]
+    B --> C[Seller sets starting price and commit, reveal, inspection windows]
+    C --> D[Listing becomes discoverable]
+    D --> E[Buyer checks terms and prepares bid locally]
+    E --> F[Buyer commits bid hash and public deposit]
+    F --> G[Reveal window opens]
+    G --> H[Buyer reveals bid using saved secret]
+    H --> I[Auction is settled]
+    I --> J{Buyer wins?}
+    J -- No --> K[Buyer claims any available refund]
+    J -- Yes --> L[Winner inspects the asset]
+    L --> M{Accept or dispute?}
+    M -- Accept --> N[Complete settlement and grant asset access]
+    M -- Dispute --> O[Reviewer resolves under contract rules]
 ```
 
-Service listings and order discussion are coordinated by the app; payment custody and settlement are enforced by the escrow contract. The current flow creates one order per service purchase rather than a multi-item cart. On-chain actions and app status are separate steps: after a confirmed transaction, the app's signed API helper records the corresponding order update. The SDK includes helpers for both the on-chain escrow and these API updates; see the [service examples](packages/veilio-sdk/README.md#services-escrow). If a dispute is not resolved by the reviewer within seven days, the contract provides a fee-free buyer-refund fallback; someone still has to submit the timeout transaction.
+The commitment hides the bid amount until reveal. The commitment, bidder wallet, and deposit are public on-chain. A deposit must cover the bidder's maximum bid; depositing extra can obscure the exact maximum, and the excess is claimable after the relevant reveal/settlement rules allow it. The bidder must preserve the secret securely—without it, the bid cannot be revealed.
 
-## What is on-chain and what stays private?
+Listing metadata such as title, description, price, and image reference is public. Protected files and private file metadata are stored off-chain and encrypted. Dataset auctions use winner acceptance to complete settlement and release file access. NFT auctions use token custody and their separate inspection/finalization flow.
 
-| Data | Where it lives |
+### Service purchase
+
+```mermaid
+flowchart TD
+    A[Provider publishes a service] --> B[Buyer finds service and opens a conversation]
+    B --> C[Buyer and provider agree scope, price, and deadline]
+    C --> D[Buyer accepts a payment request and order is created]
+    D --> E[Buyer reviews order and funds on-chain escrow]
+    E --> F[Provider completes work and submits delivery reference]
+    F --> G[Buyer reviews delivery]
+    G --> H{Next step?}
+    H -- Approve --> I[Buyer releases escrow to provider]
+    H -- Request changes --> J[Buyer asks for a revision]
+    H -- Dispute --> K[Reviewer resolves escrow]
+    E -- Eligible refund path --> L[Buyer cancels or requests refund under contract rules]
+```
+
+The conversation and app order record are off-chain. The escrow contract holds and settles funds. After an on-chain action confirms, the matching signed API call updates the app's order status; completing only one side can leave the app and chain out of sync. The SDK contains helpers for both sides. Each service purchase creates its own order; the current flow is not a multi-item cart.
+
+### Agent bidder and service buyer
+
+1. The developer installs `veilioexchange` and `veilio-agent-tools`, then creates clients for the selected network.
+2. The developer maps the tool package's `operations` interface to those SDK clients. A separate toolset is created per network so the model cannot choose another chain at call time.
+3. The user connects a wallet. The model receives tool schemas and public results, never the wallet's private key or sealed-bid secret.
+4. Read tools can discover auctions/services and inspect auction or service-order status. Write tools request explicit user approval before they send a chat message or submit a wallet transaction.
+5. Bid preparation stores reveal material in the developer's encrypted `bidVault`. The secret must remain available until the bid is revealed and the transaction is confirmed.
+
+The package currently defines 19 auction-bidder and service-buyer tools. It does not include seller publication tools, framework-specific adapters, or an MCP server. See [`veilio-agent-tools`](packages/veilio-agent-tools) for the exact API and integration requirements.
+
+## What is public and what stays private?
+
+| Information | Visibility |
 | --- | --- |
-| Auction terms, bid commitment, deposit, revealed bid, and settlement state | Public on-chain |
-| Service order ID, parties, amount, deadline, status, and delivery reference | Public on-chain |
-| Service discussions and app-side order details | Off-chain in the app; not part of the escrow contract |
-| Uploaded file contents, private file metadata, delivery instructions, and encrypted file keys | Off-chain; sensitive asset records and file content are encrypted as described below |
+| Auction terms, bid commitment, bidder address, deposit, revealed bid, and settlement state | Public on-chain |
+| Service order parties, amount, deadline, escrow status, and delivery reference | Public on-chain, subject to the specific flow |
+| Service conversations and app-side order details | Off-chain in the app |
+| Uploaded files, private asset metadata, and encrypted file keys | Off-chain; protected file data is encrypted |
+| Sealed-bid secret before reveal | Must remain private and stored durably by the bidder |
 
-Commit-reveal is a hash-based sealed-bid mechanism, **not a zero-knowledge proof**: it hides the bid amount until reveal but does not hide bidder identity or deposit. Dataset auctions use the winner's acceptance flow to complete settlement and release file access. NFT auctions use token custody and a separate finalization path after inspection; the keeper can submit that permissionless finalization transaction. VEILIO currently uses encryption, access checks, and file-hash verification for protected asset delivery; it does not claim ZK/TEE proofs of dataset quality.
+Commit-reveal is a hash-based sealed-bid mechanism, **not a zero-knowledge proof**. It hides the bid amount until reveal, but not the bidder identity or deposit. Encryption and access checks protect file delivery; VEILIO does not claim cryptographic proof of dataset quality or ZK/TEE verification.
 
-## Testnet safety note
+## Deployment and safety notes
 
-The currently configured BNB auction deployment is immutable and affected by an identified zero-commitment issue. **Use it with test assets only; do not run valuable auctions on it.** The source fix must be deployed and verified, and access to old auction history preserved, before valuable auctions resume. This manual review is not an independent contract audit. See the [auction and asset operations guide](docs/auction-and-asset-operations.md#contract-security-deployment-note).
+- All listed networks are testnets. Do not use valuable assets or funds.
+- The active BNB auction SDK default is the patched test deployment `0x9e2d9Dcc76192b54eBF0106da09787428eAF3EE7`. The previous BNB test deployment at `0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1` is immutable and has a zero-commitment issue; old auctions remain at that address and are not migrated. See the [contract security note](docs/auction-and-asset-operations.md#contract-security-deployment-note).
+- A code fix and manual regression checks are not an independent security audit. Review the exact deployment and risks before use.
+- On-chain timers do not execute transactions by themselves. Some NFT auction settlement/finalization paths need a keeper or another funded account to submit the permissionless transaction.
+- Service escrow transactions and app status updates are separate operations. Wait for transaction confirmation and submit the corresponding signed API update.
 
-## Technical documentation
+## Developer resources
 
-- [Auction, NFT escrow, and keeper operations](docs/auction-and-asset-operations.md#veilio-nft-escrow-veilnftv4)
-- [Encrypted asset storage and upload security](docs/auction-and-asset-operations.md#encrypted-asset-storage)
+- [Developer Portal](https://veilio.fun/developers)
+- [SDK guide and runnable examples](packages/veilio-sdk/README.md)
+- [Agent tools package guide](packages/veilio-agent-tools/README.md)
+- [Agent REST API](docs/agent-api.md)
+- [Auction, NFT escrow, keeper, and encrypted storage operations](docs/auction-and-asset-operations.md)
+- [Public capability and deployment notes](docs/public-capabilities.md)
+
+## Local development
+
+```sh
+npm install
+npm run dev
+```
+
+The root project is the VEILIO web application and contract workspace. The TypeScript SDK and agent-tools package are maintained under `packages/` and have their own build/test commands. See each package README for requirements and examples.

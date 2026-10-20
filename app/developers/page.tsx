@@ -16,12 +16,31 @@ import {
   Zap,
 } from 'lucide-react';
 
-type DocsTab = 'auctions' | 'services' | 'solana' | 'agent' | 'api' | 'bat';
+type DocsTab = 'auctions' | 'services' | 'solana' | 'agent' | 'tools' | 'api' | 'bat';
 
 // Every snippet below is aligned with the veilioexchange SDK source package and the real API routes.
 const SDK_PACKAGE = 'veilioexchange';
 const SDK_VERSION = '0.5.1';
 const INSTALL_COMMAND = `npm install ${SDK_PACKAGE}@${SDK_VERSION} viem`;
+const AGENT_TOOLS_INSTALL_COMMAND = 'npm install veilio-agent-tools veilioexchange';
+
+const CODE_AGENT_TOOLS = `import { createVeilioAgentTools } from 'veilio-agent-tools';
+
+const buyerTools = createVeilioAgentTools({
+  // Build one toolset for one network. Use a different instance for each chain.
+  network: 'base-sepolia', // 'bnb-testnet' | 'base-sepolia' | 'solana-devnet'
+  walletAddress: buyerWalletAddress,
+  operations: sdkOperationsAdapter, // map to veilioexchange clients for this network
+  bidVault: encryptedBidVault,      // durable encrypted storage for reveal secrets
+  confirmWrite: async (request) => {
+    // Show action, chain, amount, and recipient in your app/wallet confirmation UI.
+    return await askUserToApprove(request);
+  },
+});
+
+// Pass definitions to your agent framework, then dispatch its tool call:
+const functionTools = buyerTools.openAIFunctions;
+const result = await buyerTools.execute(toolCall.name, JSON.parse(toolCall.arguments));`;
 
 const CODE_SETUP = `// npm install veilioexchange@0.5.1 viem
 import { createPublicClient, createWalletClient, http } from 'viem';
@@ -465,6 +484,7 @@ const TABS: Array<{ id: DocsTab; label: string; icon: React.ComponentType<{ size
   { id: 'services', label: 'Services SDK', icon: Briefcase },
   { id: 'solana', label: 'Solana SDK', icon: Zap },
   { id: 'agent', label: 'Agent Workflow', icon: Cpu },
+  { id: 'tools', label: 'Agent Tools', icon: Cpu },
   { id: 'api', label: 'REST APIs', icon: Layers },
   { id: 'bat', label: 'Windows .BAT Setup', icon: Terminal },
 ];
@@ -701,6 +721,51 @@ export default function DevelopersPage() {
               <div className="mt-8">
                 <h3 className="text-sm font-bold uppercase text-[#E2C17C]">Discovery without any SDK:</h3>
                 <CodeBlock code={CODE_AGENT_DISCOVERY} id="code-discovery" copiedId={copiedId} onCopy={copyToClipboard} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab: Agent Tools package */}
+        {activeTab === 'tools' && (
+          <div className="mt-8 space-y-8">
+            <div className="rounded-2xl border border-white/10 bg-[#11110F] p-6 sm:p-8">
+              <h2 className="text-xl font-bold uppercase tracking-wide text-white flex items-center gap-2">
+                <Cpu className="text-[#00E5FF]" size={20} />
+                VEILIO Agent Tools · npm 0.1.0
+              </h2>
+              <p className="mt-2 text-[14px] text-[#A8A397]">
+                Install <code className="text-[#E2C17C]">veilio-agent-tools</code> for bidder and service-buyer tool schemas, guarded dispatch, and OpenAI-compatible function definitions.
+              </p>
+              <div className="mt-5 flex items-center justify-between rounded-xl border border-white/10 bg-[#0A0A09] p-2 pl-4">
+                <code className="select-all font-mono text-[13px] text-white">{AGENT_TOOLS_INSTALL_COMMAND}</code>
+                <button
+                  onClick={() => copyToClipboard(AGENT_TOOLS_INSTALL_COMMAND, 'npm-agent-tools')}
+                  className="flex items-center gap-1.5 rounded-lg bg-[#C9A45C] px-3.5 py-2 text-[11px] font-extrabold uppercase text-[#10100D] transition hover:bg-[#E2C17C]"
+                >
+                  {copiedId === 'npm-agent-tools' ? <Check size={14} /> : <Copy size={14} />}
+                  <span>{copiedId === 'npm-agent-tools' ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
+              <CodeBlock code={CODE_AGENT_TOOLS} id="code-agent-tools" copiedId={copiedId} onCopy={copyToClipboard} />
+            </div>
+
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+              <div className="rounded-2xl border border-white/10 bg-[#11110F] p-6 sm:p-8">
+                <h3 className="text-sm font-bold uppercase tracking-wide text-[#E2C17C]">Included tool groups</h3>
+                <ul className="mt-4 space-y-2 text-sm leading-relaxed text-[#A8A397]">
+                  <li><span className="text-white">Auctions:</span> discover/read, prepare and commit sealed bids, reveal, settle, inspect outcome, claim asset, dispute, and withdraw refunds.</li>
+                  <li><span className="text-white">Services:</span> discover services, open and message a conversation, inspect an order, fund escrow, submit delivery, release funds, refund, and dispute.</li>
+                </ul>
+              </div>
+              <div className="rounded-2xl border border-[#C9A45C]/25 bg-[#11110F] p-6 sm:p-8">
+                <h3 className="text-sm font-bold uppercase tracking-wide text-[#E2C17C]">Integration and safety status</h3>
+                <ul className="mt-4 space-y-2 text-sm leading-relaxed text-[#A8A397]">
+                  <li>The tool package supplies schemas and a dispatcher; it does not include ready-made adapters for agent frameworks or an MCP server.</li>
+                  <li>Provide an SDK operations adapter for the chosen network. Only wire actions supported by the matching SDK client and deployment.</li>
+                  <li>Implement <code className="text-white">confirmWrite</code> as a real user approval flow. Wallet signing keys must stay outside the model.</li>
+                  <li>Store sealed-bid reveal secrets in durable encrypted storage. Losing a secret makes the bid impossible to reveal.</li>
+                </ul>
               </div>
             </div>
           </div>
