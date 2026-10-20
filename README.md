@@ -94,7 +94,17 @@ Commit-reveal is a hash-based sealed-bid mechanism, **not a zero-knowledge proof
 ## Deployment and safety notes
 
 - All listed networks are testnets. Do not use valuable assets or funds.
-- The active BNB auction SDK default is the patched test deployment `0x9e2d9Dcc76192b54eBF0106da09787428eAF3EE7`. The previous BNB test deployment at `0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1` is immutable and has a zero-commitment issue; old auctions remain at that address and are not migrated. See the [contract security note](docs/auction-and-asset-operations.md#contract-security-deployment-note).
+- The BNB auction contract **has been redeployed with the zero-commitment fix**. The SDK now targets `0x9e2d9Dcc76192b54eBF0106da09787428eAF3EE7`. The previous BNB deployment at `0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1` is immutable and has the issue; old auctions remain there and are not migrated. See the [contract security note](docs/auction-and-asset-operations.md#contract-security-deployment-note).
+- The deployment defaults currently recorded by the SDK are:
+
+  | Network | Auction | Service registry | Service escrow |
+  | --- | --- | --- | --- |
+  | BNB Testnet (`97`) | `0x9e2d9Dcc76192b54eBF0106da09787428eAF3EE7` | `0x016A23A069180587d5D8B09413e97E1e78ccD702` | `0xEd83D9f97c01a94d235927704638d6e765501f50` |
+  | Base Sepolia (`84532`) | `0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1` | `0x74a6Bf3ed462898F7b3E13e7F4d1c444570bCb88` | `0x9679f83560076921f364574Ff341c37B7fcFd9A4` |
+  | Solana Devnet | `5Tw1iJGN1hhyRzepbD5eLoaRoZTEiKcqrh2HoZYhYEta` | `6CMoJyQmBobLTk4M9ZoygMShRB6A6i77e6viq2Lew2KY` | `5Vj4y8BT74PDe5VwLuDp9agTR5ak4vtZdwxnBfRW3R8s` |
+
+- **Base auction needs a separate security check.** Its current SDK address is the same address string as the legacy BNB deployment, but addresses are scoped to their chain. This repository does not record a patched Base replacement or establish that the Base deployment has the same issue or is unaffected. Verify the Base Sepolia bytecode and zero-commitment behavior before using it for bids; do not assume the BNB redeploy also updated Base.
+- Solana is a separate program deployment, not an EVM contract. The program IDs above are the SDK defaults; verify the deployed program and configuration on Devnet before funding an auction or service order.
 - A code fix and manual regression checks are not an independent security audit. Review the exact deployment and risks before use.
 - On-chain timers do not execute transactions by themselves. Some NFT auction settlement/finalization paths need a keeper or another funded account to submit the permissionless transaction.
 - Service escrow transactions and app status updates are separate operations. Wait for transaction confirmation and submit the corresponding signed API update.
