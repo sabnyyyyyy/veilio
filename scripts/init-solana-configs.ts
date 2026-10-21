@@ -9,7 +9,7 @@
  * create_auction / review_refund.
  *
  * Usage:
- *   SOLANA_REVIEWER=<pubkey> SOLANA_FEE_RECIPIENT=<pubkey> [SOLANA_FEE_BPS=500] \
+ *   SOLANA_REVIEWER=<pubkey> SOLANA_FEE_RECIPIENT=<pubkey> [SOLANA_FEE_BPS=850] \
  *   [ANCHOR_WALLET=~/.config/solana/id.json] [SOLANA_RPC_URL=https://api.devnet.solana.com] \
  *   npx ts-node --project tsconfig.hardhat.json scripts/init-solana-configs.ts [--dry-run] [--update] [--only=auction|escrow]
  *
@@ -29,9 +29,13 @@ import {
 import {
   DEFAULT_SOLANA_AUCTION_PROGRAM_ID,
   createInitializeAuctionConfigInstruction,
+  createInitializeAuctionFeeConfigInstruction,
+  createUpdateAuctionFeeConfigInstruction,
   createUpdateAuctionConfigInstruction,
   decodeAuctionConfigAccount,
+  decodeAuctionFeeConfigAccount,
   findAuctionConfigPda,
+  findAuctionFeeConfigPda,
 } from "../lib/cross-chain/solanaAuction";
 import {
   DEFAULT_SOLANA_SERVICE_ESCROW_PROGRAM_ID,
@@ -98,7 +102,7 @@ function requirePubkey(name: string): string {
 }
 
 function parseFeeBps(): number {
-  const raw = (process.env.SOLANA_FEE_BPS ?? "500").trim();
+  const raw = (process.env.SOLANA_FEE_BPS ?? "850").trim();
   const bps = Number(raw);
   if (!/^\d+$/.test(raw) || !Number.isInteger(bps) || bps < 0 || bps > MAX_FEE_BPS) {
     throw new Error(`SOLANA_FEE_BPS must be an integer between 0 and ${MAX_FEE_BPS} (got "${raw}").`);
@@ -231,6 +235,30 @@ async function main() {
     if (ix) {
       printPlan(action, ix);
       if (!options.dryRun) signatures.push(await send(connection, admin, "veilio-auction", ix, cluster));
+    }
+
+    const feeConfigPda = findAuctionFeeConfigPda(auctionProgramId).pda;
+    const feeConfigAccount = await connection.getAccountInfo(new PublicKey(feeConfigPda), "confirmed");
+    let feeIx: SolanaCompiledInstruction | null = null;
+    let feeAction = "";
+    if (feeConfigAccount?.data.length) {
+      if (feeConfigAccount.owner.toBase58() !== auctionProgramId) throw new Error(`Auction fee config PDA is owned by ${feeConfigAccount.owner.toBase58()}, not the program.`);
+      const current = decodeAuctionFeeConfigAccount(feeConfigAccount.data);
+      console.log(`  fee config:         admin=${current.admin} fee_recipient=${current.feeRecipient}`);
+      if (current.feeRecipient === feeRecipient) {
+        console.log("  fee config skip (already configured)");
+      } else {
+        if (current.admin !== adminKey) throw new Error(`Auction fee config admin is ${current.admin}; signer ${adminKey} cannot update it.`);
+        feeIx = createUpdateAuctionFeeConfigInstruction({ programId: auctionProgramId, admin: adminKey, feeRecipient });
+        feeAction = `update_fee_config(fee_recipient=${feeRecipient})`;
+      }
+    } else {
+      feeIx = createInitializeAuctionFeeConfigInstruction({ programId: auctionProgramId, admin: adminKey, feeRecipient });
+      feeAction = `initialize_fee_config(fee_recipient=${feeRecipient})`;
+    }
+    if (feeIx) {
+      printPlan(feeAction, feeIx);
+      if (!options.dryRun) signatures.push(await send(connection, admin, "veilio-auction", feeIx, cluster));
     }
   }
 

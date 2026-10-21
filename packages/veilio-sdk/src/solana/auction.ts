@@ -24,6 +24,9 @@ export const BID_COMMITMENT_SEED = Buffer.from('bid_commitment');
 export const COMMITMENT_DOMAIN_TAG = Buffer.from('VEILIO_AUCTION_COMMITMENT_V1');
 /** Global platform config PDA seed: [b"auction_config"] (AuctionConfig account). */
 export const AUCTION_CONFIG_SEED = Buffer.from('auction_config');
+export const AUCTION_FEE_CONFIG_SEED = Buffer.from('auction_fee_config');
+export const AUCTION_FEE_CONFIG_ACCOUNT_SIZE = 73;
+export const AUCTION_PLATFORM_FEE_BPS = 700;
 /** 8 (discriminator) + 32 admin + 32 reviewer + 1 bump */
 export const AUCTION_CONFIG_ACCOUNT_SIZE = 73;
 
@@ -72,6 +75,60 @@ export function findAuctionConfigPda(
   programId: string = getSolanaAuctionProgramId()
 ): { pda: string; bump: number } {
   return findProgramDerivedAddress([AUCTION_CONFIG_SEED], programId);
+}
+
+export function findAuctionFeeConfigPda(
+  programId: string = getSolanaAuctionProgramId()
+): { pda: string; bump: number } {
+  return findProgramDerivedAddress([AUCTION_FEE_CONFIG_SEED], programId);
+}
+
+export interface DecodedAuctionFeeConfig {
+  admin: string;
+  feeRecipient: string;
+  bump: number;
+}
+
+export function decodeAuctionFeeConfigAccount(data: Buffer | Uint8Array): DecodedAuctionFeeConfig {
+  const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  if (buf.length < AUCTION_FEE_CONFIG_ACCOUNT_SIZE) throw new Error(`Buffer too short for AuctionFeeConfig: ${buf.length} bytes`);
+  if (!buf.subarray(0, 8).equals(getAnchorDiscriminator('account', 'AuctionFeeConfig'))) throw new Error('Invalid account discriminator: not an AuctionFeeConfig');
+  return { admin: encodeBase58(buf.subarray(8, 40)), feeRecipient: encodeBase58(buf.subarray(40, 72)), bump: buf.readUInt8(72) };
+}
+
+export function createInitializeAuctionFeeConfigInstruction(params: {
+  programId?: string;
+  admin: string;
+  feeRecipient: string;
+}): SolanaCompiledInstruction {
+  const programId = params.programId || getSolanaAuctionProgramId();
+  const { pda: feeConfigPda } = findAuctionFeeConfigPda(programId);
+  return {
+    programId,
+    accounts: [
+      { pubkey: feeConfigPda, isSigner: false, isWritable: true },
+      { pubkey: params.admin, isSigner: true, isWritable: true },
+      { pubkey: findAuctionConfigPda(programId).pda, isSigner: false, isWritable: false },
+      { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
+    ],
+    data: Buffer.concat([getAnchorDiscriminator('global', 'initialize_fee_config'), nonDefaultPubkey(params.feeRecipient, 'fee recipient')]),
+  };
+}
+
+export function createUpdateAuctionFeeConfigInstruction(params: {
+  programId?: string;
+  admin: string;
+  feeRecipient: string;
+}): SolanaCompiledInstruction {
+  const programId = params.programId || getSolanaAuctionProgramId();
+  return {
+    programId,
+    accounts: [
+      { pubkey: findAuctionFeeConfigPda(programId).pda, isSigner: false, isWritable: true },
+      { pubkey: params.admin, isSigner: true, isWritable: false },
+    ],
+    data: Buffer.concat([getAnchorDiscriminator('global', 'update_fee_config'), nonDefaultPubkey(params.feeRecipient, 'fee recipient')]),
+  };
 }
 
 export interface DecodedAuctionConfig {
@@ -441,6 +498,7 @@ export function createAcceptDatasetInstruction(params: {
   auctionId: bigint | number;
   seller: string;
   winner: string;
+  feeRecipient: string;
 }): SolanaCompiledInstruction {
   const programId = params.programId || getSolanaAuctionProgramId();
   const { pda: auctionPda } = findAuctionPda(params.auctionId, programId);
@@ -455,6 +513,8 @@ export function createAcceptDatasetInstruction(params: {
       { pubkey: bidCommitmentPda, isSigner: false, isWritable: true },
       { pubkey: params.seller, isSigner: false, isWritable: true },
       { pubkey: params.winner, isSigner: true, isWritable: true },
+      { pubkey: findAuctionFeeConfigPda(programId).pda, isSigner: false, isWritable: false },
+      { pubkey: params.feeRecipient, isSigner: false, isWritable: true },
     ],
     data: discriminator,
   };
@@ -473,6 +533,7 @@ export function createReviewRefundInstruction(params: {
   reviewer: string;
   winner: string;
   approve: boolean;
+  feeRecipient: string;
 }): SolanaCompiledInstruction {
   const programId = params.programId || getSolanaAuctionProgramId();
   const { pda: auctionPda } = findAuctionPda(params.auctionId, programId);
@@ -486,6 +547,8 @@ export function createReviewRefundInstruction(params: {
       { pubkey: params.reviewer, isSigner: true, isWritable: false },
       { pubkey: params.winner, isSigner: false, isWritable: true },
       { pubkey: findAuctionConfigPda(programId).pda, isSigner: false, isWritable: false },
+      { pubkey: findAuctionFeeConfigPda(programId).pda, isSigner: false, isWritable: false },
+      { pubkey: params.feeRecipient, isSigner: false, isWritable: true },
     ],
     data: Buffer.concat([
       getAnchorDiscriminator('global', 'review_refund'),
@@ -500,6 +563,7 @@ export function createFinalizeInspectionTimeoutInstruction(params: {
   seller: string;
   winner: string;
   caller: string;
+  feeRecipient: string;
 }): SolanaCompiledInstruction {
   const programId = params.programId || getSolanaAuctionProgramId();
   const { pda: auctionPda } = findAuctionPda(params.auctionId, programId);
@@ -512,6 +576,8 @@ export function createFinalizeInspectionTimeoutInstruction(params: {
       { pubkey: params.seller, isSigner: false, isWritable: true },
       { pubkey: params.winner, isSigner: false, isWritable: true },
       { pubkey: params.caller, isSigner: true, isWritable: false },
+      { pubkey: findAuctionFeeConfigPda(programId).pda, isSigner: false, isWritable: false },
+      { pubkey: params.feeRecipient, isSigner: false, isWritable: true },
     ],
     data: getAnchorDiscriminator('global', 'finalize_inspection_timeout'),
   };

@@ -15,7 +15,7 @@
 
 The previous BNB Testnet V4 deployment at `0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1` accepts `bytes32(0)` as a commitment, even though zero is also used as the "no commitment" sentinel. A wallet could submit repeated zero commitments and distort bidder/refund accounting. That immutable deployment remains affected.
 
-The patched `VeilNFTV4` was redeployed to BNB Testnet at `0x9e2d9Dcc76192b54eBF0106da09787428eAF3EE7`; its inherited `commitBid` rejects a zero commitment. Configure `NEXT_PUBLIC_V4_CONTRACT_ADDRESS` to this address in every app/keeper hosting environment before using the hosted app. The repository and SDK defaults point to the patched deployment. Old test auctions remain on the old contract and are not migrated. This remediation is not an independent contract audit.
+The updated `VeilNFTV4` is deployed at `0xae24bceed5f7BFb662AE170CA4C8bB4Fd4209FEf` on BNB Testnet and `0xbac318dE378Ac19d5aBB93076feAa131eE649Bc6` on Base Sepolia. Both use the source that rejects zero commitments and sets the auction platform fee to 7%. Configure hosting to use these addresses; stale previous deployment values are mapped to the active deployments by the app. Old test auctions remain on their original contracts and are not migrated. This remediation is not an independent contract audit.
 
 ## Required deployment configuration
 

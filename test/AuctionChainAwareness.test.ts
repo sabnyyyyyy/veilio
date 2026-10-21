@@ -170,11 +170,11 @@ describe('Auction chain awareness (BNB / Base / Solana)', () => {
       expect(getNetworkConfig('base:84532').contracts.auction?.toLowerCase()).to.equal(BASE_SEPOLIA_AUCTION_ADDRESS.toLowerCase());
     });
 
-    it('describes no penalty and 0% fee for Solana, 5% penalty and 10% fee for EVM', () => {
+    it('describes no penalty and 7% fee for Solana, 5% penalty and 7% fee for EVM', () => {
       expect(noWinnerRefundText('solana:devnet', 'SOL')).to.not.match(/5%|penalty for unrevealed/);
       expect(noWinnerRefundText('bnb:97', 'BNB')).to.include('5%');
-      expect(auctionPlatformFeeBps('solana:devnet')).to.equal(0);
-      expect(auctionPlatformFeeBps('base:84532')).to.equal(1000);
+      expect(auctionPlatformFeeBps('solana:devnet')).to.equal(700);
+      expect(auctionPlatformFeeBps('base:84532')).to.equal(700);
     });
 
     it('marks the reveal bidder writable so over-deposit refunds work even with a relayer fee payer', () => {
@@ -197,12 +197,11 @@ describe('Auction chain awareness (BNB / Base / Solana)', () => {
         seller, reviewer, auctionId: 7n, itemName: 'x', description: 'y', imageUri: 'z',
         startingPriceLamports: 1n, commitDurationSeconds: 60, revealDurationSeconds: 60, inspectionDurationSeconds: 3600,
       });
-      const review = createReviewRefundInstruction({ auctionId: 7n, seller, reviewer, winner, approve: false });
-      for (const ix of [create, review]) {
-        expect(ix.accounts[ix.accounts.length - 1]).to.deep.equal({ pubkey: config, isSigner: false, isWritable: false });
-      }
+      const review = createReviewRefundInstruction({ auctionId: 7n, seller, reviewer, winner, approve: false, feeRecipient: seller });
+      expect(create.accounts[create.accounts.length - 1]).to.deep.equal({ pubkey: config, isSigner: false, isWritable: false });
+      expect(review.accounts[5]).to.deep.equal({ pubkey: config, isSigner: false, isWritable: false });
       expect(create.accounts).to.have.length(5);
-      expect(review.accounts).to.have.length(6);
+      expect(review.accounts).to.have.length(8);
     });
   });
 

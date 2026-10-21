@@ -301,9 +301,9 @@ const createIx = sol.createCreateAuctionInstruction({
 });
 assert.equal(createIx.accounts.length, 5);
 assert.deepEqual(lastKey(createIx), { pubkey: auctionConfigPda, isSigner: false, isWritable: false });
-const reviewIx = sol.createReviewRefundInstruction({ auctionId: 9n, seller: sellerKey, reviewer: platformReviewer, winner: agentKey.publicKey.toBase58(), approve: true });
-assert.equal(reviewIx.accounts.length, 6);
-assert.deepEqual(lastKey(reviewIx), { pubkey: auctionConfigPda, isSigner: false, isWritable: false });
+const reviewIx = sol.createReviewRefundInstruction({ auctionId: 9n, seller: sellerKey, reviewer: platformReviewer, winner: agentKey.publicKey.toBase58(), approve: true, feeRecipient: platformFeeRecipient });
+assert.equal(reviewIx.accounts.length, 8);
+assert.deepEqual(reviewIx.accounts[5], { pubkey: auctionConfigPda, isSigner: false, isWritable: false });
 
 // initialize_config / update_config builders + decoders
 const adminKey = Keypair.generate().publicKey.toBase58();
@@ -313,7 +313,7 @@ assert.deepEqual(initEscrow.accounts.map((a) => a.pubkey), [
 ]);
 assert.ok(initEscrow.data.subarray(0, 8).equals(sol.getAnchorDiscriminator('global', 'initialize_config')));
 assert.equal(initEscrow.data.length, 8 + 32 + 32 + 2);
-assert.throws(() => sol.createInitializeEscrowConfigInstruction({ admin: adminKey, reviewer: platformReviewer, feeRecipient: platformFeeRecipient, feeBasisPoints: 501 }), /between 0 and 500/);
+assert.throws(() => sol.createInitializeEscrowConfigInstruction({ admin: adminKey, reviewer: platformReviewer, feeRecipient: platformFeeRecipient, feeBasisPoints: 851 }), /between 0 and 850/);
 const updEscrow = sol.createUpdateEscrowConfigInstruction({ admin: adminKey, reviewer: platformReviewer, feeRecipient: platformFeeRecipient, feeBasisPoints: 100 });
 assert.equal(updEscrow.data.length, 8 + 32 + 32 + 2 + 32);
 assert.ok(updEscrow.data.subarray(0, 8).equals(sol.getAnchorDiscriminator('global', 'update_config')));

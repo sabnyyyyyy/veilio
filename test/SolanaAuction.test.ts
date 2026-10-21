@@ -14,6 +14,7 @@ import {
   decodeAuctionStateAccount,
   decodeBidCommitmentAccount,
   decodeAuctionConfigAccount,
+  findAuctionFeeConfigPda,
   findAuctionConfigPda,
   createInitializeAuctionConfigInstruction,
   createUpdateAuctionConfigInstruction,
@@ -367,9 +368,10 @@ describe('VEILIO Milestone 4 — Solana Auction Program & Client Interface', () 
         auctionId,
         seller: sellerWallet,
         winner: bidderWallet1,
+        feeRecipient: sellerWallet,
       });
 
-      expect(ix.accounts).to.have.length(4);
+      expect(ix.accounts).to.have.length(6);
       expect(ix.accounts[2].pubkey).to.equal(sellerWallet);
       expect(ix.accounts[3].pubkey).to.equal(bidderWallet1);
       expect(ix.accounts[3].isSigner).to.be.true;
@@ -610,7 +612,7 @@ describe('VEILIO Milestone 4 — Solana Auction Program & Client Interface', () 
       expect(findAuctionConfigPda(dummyProgramId)).to.deep.equal({ pda: expected.toBase58(), bump });
     });
 
-    it('appends the config PDA as the last, read-only account of review_refund', () => {
+    it('includes the configured fee treasury and both global configs in review_refund', () => {
       const ix = createReviewRefundInstruction({
         programId: dummyProgramId,
         auctionId,
@@ -618,9 +620,10 @@ describe('VEILIO Milestone 4 — Solana Auction Program & Client Interface', () 
         reviewer: reviewerWallet,
         winner: bidderWallet1,
         approve: true,
+        feeRecipient: reviewerWallet,
       });
       const { pda: auctionPda } = findAuctionPda(auctionId, dummyProgramId);
-      // Pre-upgrade ReviewRefund: auction, bid_commitment, seller, reviewer, winner (+ config last)
+      // ReviewRefund appends auction config and fee config/treasury after the original accounts.
       expect(ix.accounts.map((a) => a.pubkey)).to.deep.equal([
         auctionPda,
         findBidCommitmentPda(auctionPda, bidderWallet1, dummyProgramId).pda,
@@ -628,6 +631,8 @@ describe('VEILIO Milestone 4 — Solana Auction Program & Client Interface', () 
         reviewerWallet,
         bidderWallet1,
         findAuctionConfigPda(dummyProgramId).pda,
+        findAuctionFeeConfigPda(dummyProgramId).pda,
+        reviewerWallet,
       ]);
       expect(ix.accounts[3].isSigner).to.be.true;
       expect(ix.accounts[5].isSigner).to.be.false;

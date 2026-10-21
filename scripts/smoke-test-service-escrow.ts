@@ -37,11 +37,11 @@ async function main() {
   console.log(`- Platform Fee BPS:      ${feeBps} (${Number(feeBps) / 100}%)`);
   console.log(`- Max Fee BPS:           ${maxFeeBps} (${Number(maxFeeBps) / 100}%)`);
 
-  if (Number(feeBps) !== 500) {
-    throw new Error(`Expected platformFeeBasisPoints to be 500, but got ${feeBps}`);
+  if (Number(feeBps) !== 850) {
+    throw new Error(`Expected platformFeeBasisPoints to be 850, but got ${feeBps}`);
   }
-  if (Number(maxFeeBps) !== 500) {
-    throw new Error(`Expected MAX_FEE_BPS to be 500, but got ${maxFeeBps}`);
+  if (Number(maxFeeBps) !== 850) {
+    throw new Error(`Expected MAX_FEE_BPS to be 850, but got ${maxFeeBps}`);
   }
 
   // 2. Perform a live small-value escrow workflow smoke test

@@ -63,7 +63,7 @@ contract VeilV3 {
     address public reviewer; // Centralized VEIL reviewer for MVP
     address public feeRecipient; // Destination for platform fees
     address public owner; // Admin able to rotate reviewer / feeRecipient
-    uint256 public constant PLATFORM_FEE_BPS = 1000; // 10%
+    uint256 public constant PLATFORM_FEE_BPS = 700; // 7%
     uint256 public constant BPS_DENOMINATOR = 10000;
     uint256 public constant NON_REVEAL_PENALTY_PERCENT = 5; // anti-abort penalty, credited to feeRecipient
     uint256 public constant REVIEW_TIMEOUT = 7 days; // reviewer deadline, measured from requestRefund

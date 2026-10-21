@@ -800,7 +800,7 @@ export default function SellerAnalyticsPage() {
             </div>
 
             <p className="text-[11px] text-[#A8A397]">
-              *Estimated at 90% of completed winning prices on {networkName}. Pending withdrawals, disputes, and non-reveal penalties are calculated per protocol rules.
+              *Estimated at 93% of completed winning prices on {networkName}. Pending withdrawals, disputes, and non-reveal penalties are calculated per protocol rules.
             </p>
 
             {/* Empty Listings State */}

@@ -1023,13 +1023,13 @@ try {
                     </>
                   )}
                 </div>
-                <p className="border border-[#8B7BFF]/20 bg-[#8B7BFF]/[0.05] px-4 py-3 text-xs leading-5 text-[#B9B2D8]">Solana auction bids and settlement are denominated in SOL. The Devnet program charges no platform fee (the seller receives the full winning bid) and no penalty for unrevealed bids. NFT escrow is not available on Solana.</p>
+                <p className="border border-[#8B7BFF]/20 bg-[#8B7BFF]/[0.05] px-4 py-3 text-xs leading-5 text-[#B9B2D8]">Solana auction bids and settlement are denominated in SOL. Successful sales pay a 7% platform fee; unrevealed bids have no additional penalty. NFT escrow is not available on Solana.</p>
                 <label className="flex items-start gap-2.5 text-xs leading-5 text-[#A8A397]">
                   <input type="checkbox" checked={solanaLimitAcknowledged} onChange={(event) => setSolanaLimitAcknowledged(event.target.checked)} className="mt-1 accent-[#8B7BFF]" />
                   <span>I understand this creates an auction account on Solana Devnet (test network) and that refund disputes are decided by the reviewer shown above, with a 7-day timeout that returns the escrow to the winner.</span>
                 </label>
               </> : <p className="border border-[#C9A45C]/20 bg-[#C9A45C]/5 px-4 py-3 text-xs leading-5 text-[#A8A397]">
-                Successful sales pay a 10% VEILIO fee from the winning bid. The remaining 90% is credited to the seller for withdrawal. The active contract uses first-price settlement: the winner pays their revealed bid. Bidders who do not reveal lose 5% of their deposit.
+                Successful sales pay a 7% VEILIO fee from the winning bid. The remaining 93% is credited to the seller for withdrawal. The active contract uses first-price settlement: the winner pays their revealed bid. Bidders who do not reveal lose 5% of their deposit on EVM networks.
               </p>}
             </div>
 

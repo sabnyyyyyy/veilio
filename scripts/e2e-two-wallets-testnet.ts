@@ -111,17 +111,17 @@ async function main() {
   console.log(`- Platform Fee:          ${feeBps} bps (${Number(feeBps) / 100}%)`);
   console.log(`- Max Fee Cap:           ${maxFeeBps} bps (${Number(maxFeeBps) / 100}%)`);
 
-  if (Number(feeBps) !== 500) {
-    throw new Error(`Expected platformFeeBasisPoints to be 500 (5%), but got ${feeBps}`);
+  if (Number(feeBps) !== 850) {
+    throw new Error(`Expected platformFeeBasisPoints to be 850 (8.5%), but got ${feeBps}`);
   }
 
   const results: TestResult[] = [];
 
   // ============================================================================
-  // FLOW 1: Full Happy Path (Deposit -> Deliver -> Approve & Release with 5% Fee)
+  // FLOW 1: Full Happy Path (Deposit -> Deliver -> Approve & Release with 8.5% Fee)
   // ============================================================================
   console.log("\n--------------------------------------------------------------------------------");
-  console.log("FLOW 1: FULL HAPPY PATH (Deposit -> Deliver -> Approve & Release with 5% Fee)");
+  console.log("FLOW 1: FULL HAPPY PATH (Deposit -> Deliver -> Approve & Release with 8.5% Fee)");
   console.log("--------------------------------------------------------------------------------");
 
   const orderId1 = ethers.id(`e2e-happy-${Date.now()}`);
@@ -210,7 +210,7 @@ async function main() {
     role: "Buyer",
     status: "PASS",
     txHash: releaseTx1.hash,
-    details: `Settled 0.0001 tBNB: Seller received 95% (${ethers.formatEther(actualSellerDelta)} tBNB), Platform received 5% (${ethers.formatEther(actualFeeDelta)} tBNB)`,
+    details: `Settled 0.0001 tBNB: Seller received 91.5% (${ethers.formatEther(actualSellerDelta)} tBNB), Platform received 8.5% (${ethers.formatEther(actualFeeDelta)} tBNB)`,
   });
 
   // ============================================================================

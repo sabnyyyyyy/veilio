@@ -26,6 +26,9 @@ export * from './errors';
 export * from './auth';
 export * from './servicesApi';
 
+const PREVIOUS_BNB_SERVICE_ESCROW_ADDRESS = '0xed83d9f97c01a94d235927704638d6e765501f50';
+const ACTIVE_BNB_SERVICE_ESCROW_ADDRESS = '0x16121bD0CA81867aF5395430C1d640154C7cB36A';
+
 /**
  * In-app copy of the published SDK (packages/veilio-sdk). Same API, but addresses come from the
  * app's environment (lib/contract.ts + NEXT_PUBLIC_* service escrow vars), read lazily so tests and
@@ -33,19 +36,27 @@ export * from './servicesApi';
  */
 export const VEILIO_DEPLOYMENTS = {
   get bnbTestnet() {
+    const configuredEscrow = typeof process !== 'undefined'
+      ? process.env.NEXT_PUBLIC_SERVICE_ESCROW_CONTRACT_ADDRESS
+      : '';
     return {
       chainId: bnbChain.id as 97,
       auction: VEIL_V3_CONTRACT_ADDRESS as Address,
-      // No unverified hardcoded fallback: must come from NEXT_PUBLIC_SERVICE_ESCROW_CONTRACT_ADDRESS.
-      serviceEscrow: ((typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SERVICE_ESCROW_CONTRACT_ADDRESS : '') || '') as Address,
+      serviceEscrow: (configuredEscrow?.toLowerCase() === PREVIOUS_BNB_SERVICE_ESCROW_ADDRESS
+        ? ACTIVE_BNB_SERVICE_ESCROW_ADDRESS
+        : configuredEscrow || ACTIVE_BNB_SERVICE_ESCROW_ADDRESS) as Address,
     };
   },
   get baseSepolia() {
+    const configuredEscrow = typeof process !== 'undefined'
+      ? process.env.NEXT_PUBLIC_BASE_SEPOLIA_SERVICE_ESCROW_ADDRESS
+      : '';
     return {
       chainId: 84532 as const,
       auction: BASE_SEPOLIA_AUCTION_ADDRESS as Address,
-      serviceEscrow: ((typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_BASE_SEPOLIA_SERVICE_ESCROW_ADDRESS : '') ||
-        '0x9679f83560076921f364574Ff341c37B7fcFd9A4') as Address,
+      serviceEscrow: (configuredEscrow?.toLowerCase() === '0x9679f83560076921f364574ff341c37b7fcfd9a4'
+        ? '0xcF7364F64a161f2460cFbFC707dDa51baFb8131F'
+        : configuredEscrow || '0xcF7364F64a161f2460cFbFC707dDa51baFb8131F') as Address,
     };
   },
 };
@@ -314,7 +325,7 @@ export interface DisputeFindingPayload {
 export interface DisputeDistributionPayload {
   buyerRefundPercent: number;
   sellerGrossAwardPercent: number;
-  platformFeePercent: 5;
+  platformFeePercent: 8.5;
   sellerNetPayoutCalculation: string;
 }
 
@@ -696,7 +707,7 @@ export function createVeilioServicesClient(options: VeilioServicesOptions) {
 
   /**
    * Reads platform fee configuration from VeilServiceEscrow.
-   * Maximum allowed platform fee is 500 basis points (5%).
+   * Maximum allowed platform fee is 850 basis points (8.5%).
    * Settlement calculations are authoritative on-chain; buyer refunds are fee-free.
    */
   async function getFeeConfig() {
@@ -1134,7 +1145,7 @@ export function createVeilioAgent(options: VeilioAgentOptions) {
 
   /**
    * Completes an auction once the inspection period has ended without a refund request:
-   * pays the seller (minus the 10% platform fee, credited as pull payments) and, for NFT
+   * pays the seller (minus the 7% platform fee, credited as pull payments) and, for NFT
    * auctions, delivers the escrowed token to the winner. Anyone can call it.
    * This is the required completion path for NFT auctions.
    */

@@ -51,7 +51,7 @@ async function main() {
   // 3. Validate Constructor Arguments
   const reviewerAddress = process.env.REVIEWER_ADDRESS || deployer.address;
   const feeRecipientAddress = process.env.FEE_RECIPIENT_ADDRESS || deployer.address;
-  const rawFeeBps = process.env.INITIAL_FEE_BPS || "500"; // Default: 500 bps = 5%
+  const rawFeeBps = process.env.INITIAL_FEE_BPS || "850"; // Default: 850 bps = 8.5%
   const initialFeeBps = parseInt(rawFeeBps, 10);
 
   if (!ethers.isAddress(reviewerAddress)) {
@@ -60,9 +60,9 @@ async function main() {
   if (!ethers.isAddress(feeRecipientAddress)) {
     throw new Error(`Invalid FEE_RECIPIENT_ADDRESS: ${feeRecipientAddress}`);
   }
-  if (isNaN(initialFeeBps) || initialFeeBps < 0 || initialFeeBps > 500) {
+  if (isNaN(initialFeeBps) || initialFeeBps < 0 || initialFeeBps > 850) {
     throw new Error(
-      `Invalid INITIAL_FEE_BPS: "${rawFeeBps}". Fee must be an integer between 0 and 500 (max 5%).`
+      `Invalid INITIAL_FEE_BPS: "${rawFeeBps}". Fee must be an integer between 0 and 850 (max 8.5%).`
     );
   }
 

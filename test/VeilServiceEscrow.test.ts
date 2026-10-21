@@ -33,7 +33,7 @@ describe('VeilServiceEscrow Contract', () => {
     expect(await escrow.reviewer()).to.equal(reviewer.address);
     expect(await escrow.feeRecipient()).to.equal(feeRecipient.address);
     expect(await escrow.platformFeeBasisPoints()).to.equal(500n);
-    expect(await escrow.MAX_FEE_BPS()).to.equal(500n);
+    expect(await escrow.MAX_FEE_BPS()).to.equal(850n);
   });
 
   describe('Deposit & Order Funding', () => {
@@ -501,22 +501,22 @@ describe('VeilServiceEscrow Contract', () => {
       ).to.be.revertedWith('Unauthorized refund: buyer timeout only allowed before delivery');
     });
 
-    it('owner can update fee configuration up to 500 basis points and rejects above 500', async () => {
-      // 500 bps is accepted (5%)
-      await expect(escrow.connect(owner).setFeeConfig(stranger.address, 500))
+    it('owner can update fee configuration up to 850 basis points and rejects above 850', async () => {
+      // 850 bps is accepted (8.5%)
+      await expect(escrow.connect(owner).setFeeConfig(stranger.address, 850))
         .to.emit(escrow, 'FeeConfigUpdated')
-        .withArgs(stranger.address, 500);
+        .withArgs(stranger.address, 850);
 
-      expect(await escrow.platformFeeBasisPoints()).to.equal(500n);
+      expect(await escrow.platformFeeBasisPoints()).to.equal(850n);
       expect(await escrow.feeRecipient()).to.equal(stranger.address);
 
-      // Above 500 bps (e.g. 501 bps or 600 bps or 1000 bps) is rejected
+      // Above 850 bps is rejected
       await expect(
-        escrow.connect(owner).setFeeConfig(stranger.address, 501)
+        escrow.connect(owner).setFeeConfig(stranger.address, 851)
       ).to.be.revertedWith('Fee exceeds max');
 
       await expect(
-        escrow.connect(owner).setFeeConfig(stranger.address, 600)
+        escrow.connect(owner).setFeeConfig(stranger.address, 900)
       ).to.be.revertedWith('Fee exceeds max');
 
       await expect(
@@ -524,10 +524,10 @@ describe('VeilServiceEscrow Contract', () => {
       ).to.be.revertedWith('Fee exceeds max');
     });
 
-    it('constructor rejects initial fee exceeding 500 basis points', async () => {
+    it('constructor rejects initial fee exceeding 850 basis points', async () => {
       const EscrowFactory = await ethers.getContractFactory('VeilServiceEscrow');
       await expect(
-        EscrowFactory.deploy(reviewer.address, feeRecipient.address, 501)
+        EscrowFactory.deploy(reviewer.address, feeRecipient.address, 851)
       ).to.be.revertedWith('Fee exceeds max');
     });
 
@@ -585,7 +585,7 @@ describe('VeilServiceEscrow Contract', () => {
         .withArgs(orderId2, buyer.address, seller.address, ethers.parseEther('0.99'), ethers.parseEther('0.01'));
     });
 
-    it('uses the snapshotted fee in dispute resolution and keeps the 5% cap', async () => {
+    it('uses the snapshotted fee in dispute resolution and keeps the 8.5% cap', async () => {
       await fund(orderId1);
       await escrow.connect(owner).setFeeConfig(feeRecipient.address, 0);
       await escrow.connect(buyer).dispute(orderId1, 'quality');
@@ -593,7 +593,7 @@ describe('VeilServiceEscrow Contract', () => {
       await escrow.connect(reviewer).resolveDispute(orderId1, 0);
       const after = await ethers.provider.getBalance(feeRecipient.address);
       expect(after - before).to.equal(ethers.parseEther('0.05'));
-      await expect(escrow.connect(owner).setFeeConfig(feeRecipient.address, 501)).to.be.revertedWith('Fee exceeds max');
+      await expect(escrow.connect(owner).setFeeConfig(feeRecipient.address, 851)).to.be.revertedWith('Fee exceeds max');
     });
 
     it('refunds the buyer in full after DISPUTE_TIMEOUT when the reviewer is absent (anyone can trigger)', async () => {

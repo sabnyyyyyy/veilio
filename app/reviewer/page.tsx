@@ -14,6 +14,7 @@ import {
 } from '@/lib/auctionNetwork';
 import { buildAuctionAuth, connectSolanaWallet, sendSolanaAuctionInstructions } from '@/lib/client/auctionWallet';
 import { createReviewRefundInstruction } from '@/lib/cross-chain/solanaAuction';
+import { getSolanaServiceFeeRecipient } from '@/lib/cross-chain/solanaServiceEscrow';
 import { fetchSolanaAuctionConfig, fetchSolanaAuctionStateById } from '@/lib/solanaAuctions';
 
 interface RefundRequest {
@@ -183,6 +184,7 @@ export default function ReviewerDashboard() {
           reviewer,
           winner: onchain.winner,
           approve: approved,
+          feeRecipient: getSolanaServiceFeeRecipient(),
         });
         await sendSolanaAuctionInstructions([inst], reviewer, 'Solana refund review');
         await loadAuctionStates(refunds, networkId);

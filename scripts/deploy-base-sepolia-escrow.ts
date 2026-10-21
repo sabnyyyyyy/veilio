@@ -24,10 +24,10 @@ async function main() {
 
   const reviewer = process.env.REVIEWER_ADDRESS;
   const feeRecipient = process.env.FEE_RECIPIENT_ADDRESS;
-  const feeBps = parseInt(process.env.INITIAL_FEE_BPS || "500", 10);
+  const feeBps = parseInt(process.env.INITIAL_FEE_BPS || "850", 10);
   if (!reviewer || !ethers.isAddress(reviewer)) throw new Error("Set a valid REVIEWER_ADDRESS.");
   if (!feeRecipient || !ethers.isAddress(feeRecipient)) throw new Error("Set a valid FEE_RECIPIENT_ADDRESS.");
-  if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps > 500) throw new Error("INITIAL_FEE_BPS must be 0-500.");
+  if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps > 850) throw new Error("INITIAL_FEE_BPS must be 0-850.");
 
   console.log(`Deploying VeilServiceEscrow (reviewer ${reviewer}, fee ${feeBps} bps to ${feeRecipient})...`);
   const factory = await ethers.getContractFactory("VeilServiceEscrow", deployer);

@@ -783,7 +783,7 @@ export default function OrderDetailPage() {
     const effectiveAddress = isSolanaOrder ? solanaAddress : address;
     if (!order || !effectiveAddress) return;
 
-    if (!confirm('Are you sure you want to approve this work? This will release escrow funds to the seller on-chain (95% to seller, 5% platform fee).')) return;
+    if (!confirm('Are you sure you want to approve this work? This releases the escrow on-chain (91.5% to seller, 8.5% platform fee).')) return;
 
     if (isSolanaOrder) {
       try {
@@ -906,7 +906,7 @@ export default function OrderDetailPage() {
       if (data.success && data.order) {
         setOrder(data.order);
         setTxStage('confirmed');
-        setTxSuccessMessage('Work approved! 95% payout released to seller, 5% fee sent to platform on-chain.');
+        setTxSuccessMessage('Work approved! 91.5% payout released to seller, 8.5% fee sent to platform on-chain.');
         if (address) {
           saveServiceActivity({
             id: `act_release_${order.id}_${Date.now()}`,

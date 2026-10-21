@@ -98,7 +98,7 @@ describe('VEILIO AI-Powered Dispute Resolution System', () => {
         recommendedDistribution: {
           buyerRefundPercent: 20,
           sellerGrossAwardPercent: 80,
-          platformFeePercent: 5,
+          platformFeePercent: 8.5,
           sellerNetPayoutCalculation: '',
         },
         confidence: {
@@ -127,7 +127,7 @@ describe('VEILIO AI-Powered Dispute Resolution System', () => {
       expect(validated.recommendedDistribution.sellerNetPayoutCalculation).to.include('Net Seller Payout 76%');
     });
 
-    it('deducts the 5% platform fee only from seller gross award, leaving buyer refund fee-free', () => {
+    it('deducts the 8.5% platform fee only from seller gross award, leaving buyer refund fee-free', () => {
       const mockRaw = {
         summary: '50-50 compromise split.',
         findings: [],
@@ -135,7 +135,7 @@ describe('VEILIO AI-Powered Dispute Resolution System', () => {
         recommendedDistribution: {
           buyerRefundPercent: 50,
           sellerGrossAwardPercent: 50,
-          platformFeePercent: 5,
+          platformFeePercent: 8.5,
           sellerNetPayoutCalculation: '',
         },
         confidence: { level: 'medium', explanation: 'Fair split', isCalibratedProbability: false },
@@ -147,8 +147,8 @@ describe('VEILIO AI-Powered Dispute Resolution System', () => {
       const validated = validateDisputeRecommendation(mockRaw, 'disp-002', orderId);
       expect(validated.recommendedDistribution.buyerRefundPercent).to.equal(50);
       expect(validated.recommendedDistribution.sellerGrossAwardPercent).to.equal(50);
-      // 50 - (50 * 0.05) = 47.5% net seller
-      expect(validated.recommendedDistribution.sellerNetPayoutCalculation).to.include('Net Seller Payout 47.5%');
+      // 50 - (50 * 0.085) = 45.75% net seller
+      expect(validated.recommendedDistribution.sellerNetPayoutCalculation).to.include('Net Seller Payout 45.75%');
       expect(validated.recommendedDistribution.sellerNetPayoutCalculation).to.include('Buyer Refund 50% has 0% fee');
     });
   });
@@ -453,7 +453,7 @@ describe('VEILIO AI-Powered Dispute Resolution System', () => {
       expect(finalFeeBal - initialFeeBal).to.equal(0n);
     });
 
-    it('executes 50/50 split: buyer receives 50% with 0 fee; seller receives 50% minus 5% platform fee', async () => {
+    it('executes 50/50 split: buyer receives 50% with 0 fee; seller receives 50% minus 8.5% platform fee', async () => {
       const testOrderId = ethers.keccak256(ethers.toUtf8Bytes('test-dispute-split-50-50'));
       const deadline = Math.floor(Date.now() / 1000) + 3600;
       const depositAmount = ethers.parseEther('1.0'); // 1 BNB
@@ -478,7 +478,7 @@ describe('VEILIO AI-Powered Dispute Resolution System', () => {
       expect(finalBuyerBal - initialBuyerBal).to.equal(ethers.parseEther('0.5'));
 
       // Seller gross share: 0.5 BNB.
-      // 5% fee on 0.5 BNB = 0.025 BNB.
+      // 8.5% fee on 0.5 BNB = 0.0425 BNB.
       // Seller net payout: 0.5 - 0.025 = 0.475 BNB.
       expect(finalFeeBal - initialFeeBal).to.equal(ethers.parseEther('0.025'));
       expect(finalSellerBal - initialSellerBal).to.equal(ethers.parseEther('0.475'));

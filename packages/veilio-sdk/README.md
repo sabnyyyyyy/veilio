@@ -7,7 +7,7 @@ TypeScript SDK for **VEILIO**: sealed-bid auctions for digital assets and milest
 - **Runtime:** Node.js 18+ or any modern browser.
 
 ```sh
-npm install veilioexchange@0.5.1 viem
+npm install veilioexchange@0.5.2 viem
 ```
 
 `viem` is a peer dependency, so your app and the SDK share one copy.
@@ -125,7 +125,7 @@ await deposit.wait();
 
 const order = await services.getOrder(orderId);      // status: 'Funded'
 await (await services.submitDelivery(orderId, 'ipfs://QmProof')).wait(); // seller
-await (await services.releaseFunds(orderId)).wait(); // buyer; 5% fee on release
+await (await services.releaseFunds(orderId)).wait(); // buyer; 8.5% fee on seller payout
 
 // Fee-free exits: services.refund(orderId, reason), services.refundTimeout(orderId),
 // services.dispute(orderId, reason)
@@ -263,7 +263,7 @@ const headers = await api.getSessionHeaders();        // for your own GET reques
 Solana lives in its own entry point so EVM-only users never load `@solana/web3.js`:
 
 ```sh
-npm install veilioexchange@0.5.1 @solana/web3.js viem
+npm install veilioexchange@0.5.2 @solana/web3.js viem
 ```
 
 ```ts
@@ -323,8 +323,8 @@ Defaults live in `VEILIO_DEPLOYMENTS` (also `getVeilioDeployment(chainId)`) and 
 
 | Network | Auction | Service escrow |
 |---|---|---|
-| BNB Testnet (97) | `0x9e2d9Dcc76192b54eBF0106da09787428eAF3EE7` | `0xEd83D9f97c01a94d235927704638d6e765501f50` |
-| Base Sepolia (84532) | `0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1` | `0x9679f83560076921f364574Ff341c37B7fcFd9A4` |
+| BNB Testnet (97) | `0xae24bceed5f7BFb662AE170CA4C8bB4Fd4209FEf` | `0x16121bD0CA81867aF5395430C1d640154C7cB36A` |
+| Base Sepolia (84532) | `0xbac318dE378Ac19d5aBB93076feAa131eE649Bc6` | `0xcF7364F64a161f2460cFbFC707dDa51baFb8131F` |
 
 ## Errors
 

@@ -287,7 +287,7 @@ export interface DisputeFindingPayload {
 export interface DisputeDistributionPayload {
   buyerRefundPercent: number;
   sellerGrossAwardPercent: number;
-  platformFeePercent: 5;
+  platformFeePercent: 8.5;
   sellerNetPayoutCalculation: string;
 }
 
@@ -669,7 +669,7 @@ export function createVeilioServicesClient(options: VeilioServicesOptions) {
 
   /**
    * Reads platform fee configuration from VeilServiceEscrow.
-   * Maximum allowed platform fee is 500 basis points (5%).
+   * Maximum allowed platform fee is 850 basis points (8.5%).
    * Settlement calculations are authoritative on-chain; buyer refunds are fee-free.
    */
   async function getFeeConfig() {
@@ -1137,7 +1137,7 @@ export function createVeilioAgent(options: VeilioAgentOptions) {
 
   /**
    * Completes an auction once the inspection period has ended without a refund request:
-   * pays the seller (minus the 10% platform fee, credited as pull payments) and, for NFT
+   * pays the seller (minus the 7% platform fee, credited as pull payments) and, for NFT
    * auctions, delivers the escrowed token to the winner. Anyone can call it.
    * This is the required completion path for NFT auctions.
    */

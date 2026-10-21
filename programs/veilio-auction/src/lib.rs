@@ -11,15 +11,15 @@ pub const AUCTION_SEED: &[u8] = b"auction";
 pub const BID_COMMITMENT_SEED: &[u8] = b"bid_commitment";
 /// Global platform config PDA: [b"auction_config"]. Holds the platform dispute reviewer.
 pub const CONFIG_SEED: &[u8] = b"auction_config";
+pub const AUCTION_FEE_CONFIG_SEED: &[u8] = b"auction_fee_config";
+pub const PLATFORM_FEE_BPS: u64 = 700;
+pub const BPS_DENOMINATOR: u64 = 10_000;
 pub const COMMITMENT_DOMAIN_TAG: &[u8] = b"VEILIO_AUCTION_COMMITMENT_V1";
 
 pub const MAX_ITEM_NAME_LEN: usize = 64;
 pub const MAX_DESC_LEN: usize = 128;
 pub const MAX_IMAGE_URI_LEN: usize = 200;
 pub const MAX_REVIEW_REASON_LEN: usize = 100;
-
-// Devnet MVP sends the full winning bid to the seller. A fee is intentionally
-// disabled until a reviewed treasury and fee policy are configured.
 
 #[repr(u8)]
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Default)]
@@ -59,6 +59,26 @@ pub mod veilio_auction {
         config.admin = new_admin;
         config.reviewer = reviewer;
         emit!(ConfigUpdatedEvent { admin: new_admin, reviewer });
+        Ok(())
+    }
+
+    /// Initializes the treasury used for future successful auction settlements.
+    pub fn initialize_fee_config(ctx: Context<InitializeFeeConfig>, fee_recipient: Pubkey) -> Result<()> {
+        require!(fee_recipient != Pubkey::default(), AuctionError::InvalidConfig);
+        let fee_config = &mut ctx.accounts.fee_config;
+        fee_config.admin = ctx.accounts.admin.key();
+        fee_config.fee_recipient = fee_recipient;
+        fee_config.bump = ctx.bumps.fee_config;
+        emit!(AuctionFeeConfigUpdatedEvent { admin: fee_config.admin, fee_recipient });
+        Ok(())
+    }
+
+    /// Rotates the auction treasury. Only future settlement transactions use the new recipient.
+    pub fn update_fee_config(ctx: Context<UpdateFeeConfig>, fee_recipient: Pubkey) -> Result<()> {
+        require!(fee_recipient != Pubkey::default(), AuctionError::InvalidConfig);
+        let fee_config = &mut ctx.accounts.fee_config;
+        fee_config.fee_recipient = fee_recipient;
+        emit!(AuctionFeeConfigUpdatedEvent { admin: fee_config.admin, fee_recipient });
         Ok(())
     }
 
@@ -298,11 +318,17 @@ pub mod veilio_auction {
         auction.state = AuctionState::Completed;
 
         let winning_price = auction.highest_bid;
-        let seller_amount = winning_price;
+        let platform_fee = calculate_platform_fee(winning_price)?;
+        let seller_amount = winning_price.checked_sub(platform_fee).ok_or(AuctionError::MathOverflow)?;
         transfer_program_lamports(
             &ctx.accounts.bid_commitment.to_account_info(),
             &ctx.accounts.seller.to_account_info(),
             seller_amount,
+        )?;
+        transfer_program_lamports(
+            &ctx.accounts.bid_commitment.to_account_info(),
+            &ctx.accounts.fee_recipient.to_account_info(),
+            platform_fee,
         )?;
 
         emit!(DatasetAcceptedEvent {
@@ -314,7 +340,7 @@ pub mod veilio_auction {
             auction: auction.key(),
             seller: auction.seller,
             seller_amount,
-            platform_fee: 0,
+            platform_fee,
             winner: ctx.accounts.winner.key(),
         });
 
@@ -367,18 +393,24 @@ pub mod veilio_auction {
                 approved: true,
             });
         } else {
-            let seller_amount = auction.highest_bid;
+            let platform_fee = calculate_platform_fee(auction.highest_bid)?;
+            let seller_amount = auction.highest_bid.checked_sub(platform_fee).ok_or(AuctionError::MathOverflow)?;
             transfer_program_lamports(
                 &ctx.accounts.bid_commitment.to_account_info(),
                 &ctx.accounts.seller.to_account_info(),
                 seller_amount,
+            )?;
+            transfer_program_lamports(
+                &ctx.accounts.bid_commitment.to_account_info(),
+                &ctx.accounts.fee_recipient.to_account_info(),
+                platform_fee,
             )?;
             auction.state = AuctionState::Completed;
             emit!(AuctionCompletedEvent {
                 auction: auction.key(),
                 seller: auction.seller,
                 seller_amount,
-                platform_fee: 0,
+                platform_fee,
                 winner: ctx.accounts.winner.key(),
             });
             emit!(RefundResolvedEvent {
@@ -421,18 +453,24 @@ pub mod veilio_auction {
         require!(ctx.accounts.bid_commitment.revealed, AuctionError::WinnerBidNotRevealed);
         require!(ctx.accounts.bid_commitment.max_bid == auction.highest_bid, AuctionError::WinnerBidMismatch);
 
-        let seller_amount = auction.highest_bid;
+        let platform_fee = calculate_platform_fee(auction.highest_bid)?;
+        let seller_amount = auction.highest_bid.checked_sub(platform_fee).ok_or(AuctionError::MathOverflow)?;
         transfer_program_lamports(
             &ctx.accounts.bid_commitment.to_account_info(),
             &ctx.accounts.seller.to_account_info(),
             seller_amount,
+        )?;
+        transfer_program_lamports(
+            &ctx.accounts.bid_commitment.to_account_info(),
+            &ctx.accounts.fee_recipient.to_account_info(),
+            platform_fee,
         )?;
         auction.state = AuctionState::Completed;
         emit!(AuctionCompletedEvent {
             auction: auction.key(),
             seller: auction.seller,
             seller_amount,
-            platform_fee: 0,
+            platform_fee,
             winner: ctx.accounts.winner.key(),
         });
         Ok(())
@@ -475,6 +513,13 @@ fn transfer_program_lamports(from: &AccountInfo, to: &AccountInfo, amount: u64) 
     Ok(())
 }
 
+fn calculate_platform_fee(winning_price: u64) -> Result<u64> {
+    Ok(winning_price
+        .checked_mul(PLATFORM_FEE_BPS)
+        .ok_or(AuctionError::MathOverflow)
+        .map(|amount| amount / BPS_DENOMINATOR)?)
+}
+
 #[derive(Accounts)]
 pub struct InitializeConfig<'info> {
     #[account(
@@ -489,13 +534,48 @@ pub struct InitializeConfig<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
 
-    #[account(constraint = program.programdata_address()? == Some(program_data.key()) @ AuctionError::UnauthorizedAdmin)]
-    pub program: Program<'info, crate::program::VeilioAuction>,
+    /// CHECK: The address is fixed to this program and ProgramData is validated below.
+    #[account(address = crate::ID)]
+    pub program: UncheckedAccount<'info>,
 
-    #[account(constraint = program_data.upgrade_authority_address == Some(admin.key()) @ AuctionError::UnauthorizedAdmin)]
+    #[account(
+        seeds = [program.key().as_ref()],
+        bump,
+        seeds::program = anchor_lang::solana_program::bpf_loader_upgradeable::ID,
+        constraint = program_data.upgrade_authority_address == Some(admin.key()) @ AuctionError::UnauthorizedAdmin
+    )]
     pub program_data: Account<'info, ProgramData>,
 
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct InitializeFeeConfig<'info> {
+    #[account(
+        init,
+        payer = admin,
+        space = AuctionFeeConfig::ACCOUNT_SIZE,
+        seeds = [AUCTION_FEE_CONFIG_SEED],
+        bump
+    )]
+    pub fee_config: Account<'info, AuctionFeeConfig>,
+
+    #[account(mut, address = config.admin @ AuctionError::UnauthorizedAdmin)]
+    pub admin: Signer<'info>,
+
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, AuctionConfig>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct UpdateFeeConfig<'info> {
+    #[account(mut, seeds = [AUCTION_FEE_CONFIG_SEED], bump = fee_config.bump)]
+    pub fee_config: Account<'info, AuctionFeeConfig>,
+
+    #[account(address = fee_config.admin @ AuctionError::UnauthorizedAdmin)]
+    pub admin: Signer<'info>,
 }
 
 #[derive(Accounts)]
@@ -620,6 +700,13 @@ pub struct WinnerSettlement<'info> {
     // to receive the PDA's rent reserve after settlement.
     #[account(mut)]
     pub winner: Signer<'info>,
+
+    #[account(seeds = [AUCTION_FEE_CONFIG_SEED], bump = fee_config.bump)]
+    pub fee_config: Account<'info, AuctionFeeConfig>,
+
+    /// CHECK: Must be the configured platform treasury.
+    #[account(mut, address = fee_config.fee_recipient)]
+    pub fee_recipient: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -652,6 +739,13 @@ pub struct FinalizeInspectionTimeout<'info> {
 
     /// Any signer may trigger settlement after inspection expires.
     pub caller: Signer<'info>,
+
+    #[account(seeds = [AUCTION_FEE_CONFIG_SEED], bump = fee_config.bump)]
+    pub fee_config: Account<'info, AuctionFeeConfig>,
+
+    /// CHECK: Must be the configured platform treasury.
+    #[account(mut, address = fee_config.fee_recipient)]
+    pub fee_recipient: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -687,6 +781,13 @@ pub struct ReviewRefund<'info> {
     /// Global platform config (appended last so existing account ordering is unchanged).
     #[account(seeds = [CONFIG_SEED], bump = config.bump)]
     pub config: Account<'info, AuctionConfig>,
+
+    #[account(seeds = [AUCTION_FEE_CONFIG_SEED], bump = fee_config.bump)]
+    pub fee_config: Account<'info, AuctionFeeConfig>,
+
+    /// CHECK: Must be the configured platform treasury.
+    #[account(mut, address = fee_config.fee_recipient)]
+    pub fee_recipient: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -783,6 +884,17 @@ pub struct AuctionConfig {
     pub bump: u8,         // 1
 }
 
+#[account]
+pub struct AuctionFeeConfig {
+    pub admin: Pubkey,
+    pub fee_recipient: Pubkey,
+    pub bump: u8,
+}
+
+impl AuctionFeeConfig {
+    pub const ACCOUNT_SIZE: usize = 8 + 32 + 32 + 1;
+}
+
 impl AuctionConfig {
     // 8 (disc) + 32 + 32 + 1 = 73
     pub const ACCOUNT_SIZE: usize = 8 + 32 + 32 + 1;
@@ -792,6 +904,12 @@ impl AuctionConfig {
 pub struct ConfigUpdatedEvent {
     pub admin: Pubkey,
     pub reviewer: Pubkey,
+}
+
+#[event]
+pub struct AuctionFeeConfigUpdatedEvent {
+    pub admin: Pubkey,
+    pub fee_recipient: Pubkey,
 }
 
 #[account]
@@ -877,6 +995,8 @@ pub struct AuctionCompletedEvent {
 
 #[error_code]
 pub enum AuctionError {
+    #[msg("Only the configured auction admin can manage configuration")]
+    UnauthorizedAdmin,
     #[msg("Commit duration must be at least 60 seconds")]
     CommitDurationTooShort,
     #[msg("Reveal duration must be at least 60 seconds")]
@@ -947,8 +1067,6 @@ pub enum AuctionError {
     RefundReviewStillActive,
     #[msg("The dispute reviewer must be different from the seller")]
     ReviewerMustBeIndependent,
-    #[msg("Only the config admin / program upgrade authority can do this")]
-    UnauthorizedAdmin,
     #[msg("Invalid platform configuration")]
     InvalidConfig,
 }

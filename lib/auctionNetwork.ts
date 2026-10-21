@@ -182,7 +182,7 @@ export function noWinnerRefundText(networkId: AuctionNetworkId, symbol: string):
   return `Any deposited ${symbol} has been credited back for withdrawal (minus a 5% anti-abort penalty for unrevealed bids).`;
 }
 
-/** Platform fee in basis points: EVM V3/V4 constant 10%, Solana program 0%. */
+/** Platform fee in basis points: 7% on EVM and Solana auction deployments. */
 export function auctionPlatformFeeBps(networkId: AuctionNetworkId): number {
-  return networkId === 'solana:devnet' ? 0 : 1000;
+  return 700;
 }

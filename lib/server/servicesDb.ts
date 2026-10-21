@@ -262,7 +262,7 @@ export interface DisputeCancellationAssessment {
 export interface DisputeRecommendedDistribution {
   buyerRefundPercent: number;
   sellerGrossAwardPercent: number;
-  platformFeePercent: 5;
+  platformFeePercent: 8.5;
   sellerNetPayoutCalculation: string;
 }
 
@@ -1198,7 +1198,7 @@ export function createServiceDispute(params: {
     reason: params.reason,
     status: 'initiated',
     cancellationPolicySnapshot:
-      'VEILIO Dispute Policy v1: Escrow fund split is evaluated against agreed scope, milestone delivery proof, deadline compliance, and mutual evidence. 5% platform fee applies to seller gross payout only. AI provides explainable recommendation; human reviewer approval required before on-chain settlement.',
+      'VEILIO Dispute Policy v1: Escrow fund split is evaluated against agreed scope, milestone delivery proof, deadline compliance, and mutual evidence. 8.5% platform fee applies to seller gross payout only. AI provides explainable recommendation; human reviewer approval required before on-chain settlement.',
     evidence: initialEvidence,
     disputeTxHash: params.disputeTxHash,
     createdAt: Date.now(),

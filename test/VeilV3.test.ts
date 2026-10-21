@@ -86,8 +86,8 @@ describe("VeilV3 First-Price Verification Suite", function () {
     const platformFee = await veil.pendingRefunds(feeRecipient.address);
 
     expect(buyerRefundAfter).to.equal(0);
-    expect(sellerProceeds).to.equal(ethers.parseEther("1.8"));
-    expect(platformFee).to.equal(ethers.parseEther("0.2"));
+    expect(sellerProceeds).to.equal(ethers.parseEther("1.86"));
+    expect(platformFee).to.equal(ethers.parseEther("0.14"));
   });
 
   // 1. Winner accepts dataset
@@ -186,8 +186,8 @@ describe("VeilV3 First-Price Verification Suite", function () {
       .to.be.revertedWith("Must provide a rejection reason");
   });
 
-  // 11. Seller receives exactly 90% after rejected refund
-  // 12. VEIL receives exactly 10%
+  // 11. Seller receives exactly 93% after rejected refund
+  // 12. VEIL receives exactly 7%
   // 13. Fee is based on winning price, NOT maximum bid
   it("11, 12, 13. Exact Fee logic on rejected refund", async function () {
     await setupAuctionToInspection();
@@ -207,12 +207,12 @@ describe("VeilV3 First-Price Verification Suite", function () {
     const postFeeRefund = await veil.pendingRefunds(feeRecipient.address);
 
     // Winning price was 2.0.
-    // 10% of 2.0 = 0.2 BNB for VEIL
-    // 90% of 2.0 = 1.8 BNB for Seller
+    // 7% of 2.0 = 0.14 BNB for VEIL
+    // 93% of 2.0 = 1.86 BNB for Seller
     expect(postBuyerRefund - preBuyerRefund).to.equal(0); // Buyer gets 0 from resolution
     expect(postOwnerRefund - preOwnerRefund).to.equal(0); // Owner is just reviewer now, gets 0
-    expect(postFeeRefund - preFeeRefund).to.equal(ethers.parseEther("0.2"));
-    expect(postSellerRefund - preSellerRefund).to.equal(ethers.parseEther("1.8"));
+    expect(postFeeRefund - preFeeRefund).to.equal(ethers.parseEther("0.14"));
+    expect(postSellerRefund - preSellerRefund).to.equal(ethers.parseEther("1.86"));
     
     const auction = await veil.auctions(1);
     expect(auction.reviewReason).to.equal("Reject");

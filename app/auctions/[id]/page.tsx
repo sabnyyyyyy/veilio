@@ -52,6 +52,7 @@ import {
   findAuctionPda,
   getSolanaAuctionProgramId,
 } from '@/lib/cross-chain/solanaAuction';
+import { getSolanaServiceFeeRecipient } from '@/lib/cross-chain/solanaServiceEscrow';
 import {
   fetchSolanaAuctionStateById,
   fetchSolanaBidCommitment,
@@ -1202,7 +1203,7 @@ export default function AuctionDetailPage() {
     await runLifecycleAction('accept delivery', async () => {
       if (isSolana) {
         const winner = await ensureSolanaWallet();
-        const inst = createAcceptDatasetInstruction({ auctionId: auction.id, seller: auction.seller, winner });
+        const inst = createAcceptDatasetInstruction({ auctionId: auction.id, seller: auction.seller, winner, feeRecipient: getSolanaServiceFeeRecipient() });
         return sendSolanaAuctionInstructions([inst], winner, 'Solana accept');
       }
       return sendEvmAuctionTx('acceptDataset', 'Accept');
@@ -1211,7 +1212,7 @@ export default function AuctionDetailPage() {
 
   /**
    * EVM `finalizeSettlement`: anyone may call once the inspection window has
-   * ended without a refund request. Pays the seller (minus the 10% fee) and,
+   * ended without a refund request. Pays the seller (minus the 7% fee) and,
    * for NFT auctions, releases the escrowed NFT to the winner — the only way
    * NFT auctions complete, since `acceptDataset` is blocked for NFTs in V4.
    * Solana equivalent: `finalize_inspection_timeout`.
@@ -1221,7 +1222,7 @@ export default function AuctionDetailPage() {
     await runLifecycleAction('finalize settlement', async () => {
       if (isSolana) {
         const caller = await ensureSolanaWallet();
-        const inst = createFinalizeInspectionTimeoutInstruction({ auctionId: auction.id, seller: auction.seller, winner: auction.highestBidder, caller });
+        const inst = createFinalizeInspectionTimeoutInstruction({ auctionId: auction.id, seller: auction.seller, winner: auction.highestBidder, caller, feeRecipient: getSolanaServiceFeeRecipient() });
         return sendSolanaAuctionInstructions([inst], caller, 'Solana inspection timeout');
       }
       return sendEvmAuctionTx('finalizeSettlement', 'Finalize settlement');

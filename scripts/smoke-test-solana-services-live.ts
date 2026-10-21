@@ -283,8 +283,8 @@ async function main() {
 
   const sellerGain = sellerBalanceAfter - sellerBalanceBefore;
   const feeGain = feeBalanceAfter - feeBalanceBefore;
-  console.log(`    - Seller Received:       ${sellerGain} lamports (Expected 95% = 9,500,000 lamports)`);
-  console.log(`    - Fee Recipient Received: ${feeGain} lamports (Expected 5% = 500,000 lamports)`);
+  console.log(`    - Seller Received:       ${sellerGain} lamports (Expected 91.5% = 9,150,000 lamports)`);
+  console.log(`    - Fee Recipient Received: ${feeGain} lamports (Expected 8.5% = 850,000 lamports)`);
 
   escrowAccount = await connection.getAccountInfo(new PublicKey(escrowPda), 'confirmed');
   decodedEscrow = decodeEscrowOrderAccount(escrowAccount!.data);

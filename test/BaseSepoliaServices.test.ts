@@ -36,7 +36,7 @@ describe('VEILIO Phase 3 — Base Sepolia Services Integration Suite', () => {
     escrowContract = (await EscrowFactory.deploy(
       reviewer.address,
       feeRecipient.address,
-      500 // 5% fee
+      850 // 8.5% fee
     )) as unknown as VeilServiceEscrow;
     await escrowContract.waitForDeployment();
   });
@@ -110,7 +110,7 @@ describe('VEILIO Phase 3 — Base Sepolia Services Integration Suite', () => {
     const orderBytes32 = formatServiceOrderId(orderIdStr);
     const depositAmountEth = ethers.parseEther('0.1'); // 0.1 ETH
 
-    it('completes the full lifecycle with 5% platform fee deduction on Base Sepolia', async () => {
+    it('completes the full lifecycle with 8.5% platform fee deduction on Base Sepolia', async () => {
       const currentBlock = await ethers.provider.getBlock('latest');
       const deadline = (currentBlock?.timestamp || Math.floor(Date.now() / 1000)) + 7200;
 
@@ -149,9 +149,9 @@ describe('VEILIO Phase 3 — Base Sepolia Services Integration Suite', () => {
       expect(orderOnChain.status).to.equal(2); // 2 = Released
       expect(orderOnChain.amount).to.equal(0n); // zeroed out
 
-      // Verify exact 5% platform fee payout
-      const expectedFee = (depositAmountEth * 500n) / 10000n; // 0.005 ETH
-      const expectedSellerPayout = depositAmountEth - expectedFee; // 0.095 ETH
+      // Verify exact 8.5% platform fee payout
+      const expectedFee = (depositAmountEth * 850n) / 10000n; // 0.0085 ETH
+      const expectedSellerPayout = depositAmountEth - expectedFee; // 0.0915 ETH
 
       const feeRecipientBalAfter = await ethers.provider.getBalance(feeRecipient.address);
       const sellerBalAfter = await ethers.provider.getBalance(seller.address);
@@ -196,7 +196,7 @@ describe('VEILIO Phase 3 — Base Sepolia Services Integration Suite', () => {
   });
 
   describe('4. Dispute Resolution on Base Sepolia', () => {
-    it('allows reviewer to resolve dispute with 60/40 split and 5% fee on seller share', async () => {
+    it('allows reviewer to resolve dispute with 60/40 split and 8.5% fee on seller share', async () => {
       const orderIdStr = 'ord-base-dispute-001';
       const orderBytes32 = formatServiceOrderId(orderIdStr);
       const amount = ethers.parseEther('1.0'); // 1 ETH
@@ -222,7 +222,7 @@ describe('VEILIO Phase 3 — Base Sepolia Services Integration Suite', () => {
 
       const buyerExpected = (amount * 60n) / 100n; // 0.6 ETH
       const sellerGross = amount - buyerExpected; // 0.4 ETH
-      const feeExpected = (sellerGross * 500n) / 10000n; // 0.02 ETH
+      const feeExpected = (sellerGross * 850n) / 10000n; // 0.034 ETH
       const sellerNet = sellerGross - feeExpected; // 0.38 ETH
 
       const feeRecipientAfter = await ethers.provider.getBalance(feeRecipient.address);

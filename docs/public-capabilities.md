@@ -27,7 +27,7 @@ The following capabilities are fully implemented in the current repository and v
 
 ### 2.2 Milestone-Based Services Escrow (`VeilServiceEscrow`)
 - **Non-Custodial Escrow:** Buyers deposit funds into a smart contract that holds funds until milestones are delivered and accepted.
-- **Strict Protocol Fee Bounds:** Protocol fee on release is strictly capped at 500 basis points (5%).
+- **Strict Protocol Fee Bounds:** Protocol fee on release is strictly capped at 850 basis points (8.5%).
 - **Fee-Free Refunds:** Consensual refunds and timeout cancellations refund 100% of the deposit to the buyer with 0% protocol fees.
 - **Pull-Payment Pattern:** Pending withdrawals are isolated to prevent denial-of-service disruptions during transfers.
 

@@ -23,7 +23,7 @@ import {
 export const ESCROW_SEED = Buffer.from('service_escrow');
 export const VAULT_SEED = Buffer.from('service_vault');
 export const MAX_DELIVERABLE_REF_LEN = 200;
-export const MAX_FEE_BPS = 500; // 5%
+export const MAX_FEE_BPS = 850; // 8.5%
 /** Global platform config PDA seed: [b"escrow_config"] (EscrowConfig account). */
 export const ESCROW_CONFIG_SEED = Buffer.from('escrow_config');
 /** 8 (discriminator) + 32 admin + 32 reviewer + 32 fee_recipient + 2 fee_basis_points + 1 bump */
@@ -639,13 +639,13 @@ export function decodeEscrowOrderAccount(buffer: Uint8Array | Buffer): DecodedSo
 
 /**
  * Calculates exact platform fee and payouts for Solana lamports.
- * Strict parity with EVM: 500 bps (5%) platform fee deducted from seller gross award.
+ * Strict parity with EVM: 850 bps (8.5%) platform fee deducted from seller gross award.
  * Buyer refunds are 100% fee-free.
  */
 export function calculateSolanaServicePayouts(
   totalLamports: bigint | number,
   splitToBuyerPercent: number = 0,
-  feeBps: number = 500
+  feeBps: number = 850
 ): {
   buyerRefundLamports: bigint;
   sellerGrossLamports: bigint;

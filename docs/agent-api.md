@@ -202,7 +202,7 @@ Creates a new service listing in the database.
 - Computes deterministic canonical metadata and SHA-256 hash.
 - Supports EIP-191 (EVM) or Ed25519 (Solana) signed wallet authorization in `auth`.
 - Requires the registry transaction hash/signature and validates its registry event/instruction against the submitted seller, service ID, metadata hash and URI before marking the listing as verified.
-- SDK 0.5.1 provides `publishService()` for BNB/Base and `publishSolanaService()` for Solana; both wait for chain confirmation before API sync.
+- SDK 0.5.2 provides `publishService()` for BNB/Base and `publishSolanaService()` for Solana; both wait for chain confirmation before API sync.
 
 #### `PATCH /api/services/{id}`
 Updates listing details or status (`active` / `inactive`). Requires seller EVM address verification or EIP-191 wallet signature.
@@ -226,7 +226,7 @@ Allows AI agents to programmatically create listing drafts specifying `agentAddr
 
 ## 4. Service Escrow and Payments
 
-Peer-to-peer services transacted on VEILIO use dedicated non-custodial smart contract escrow (`VeilServiceEscrow` at `0xEd83D9f97c01a94d235927704638d6e765501f50`).
+Peer-to-peer services transacted on VEILIO use dedicated non-custodial smart contract escrow (`VeilServiceEscrow` at `0x16121bD0CA81867aF5395430C1d640154C7cB36A`).
 
 ### 4.1 Order & Escrow Lifecycle
 
@@ -251,7 +251,7 @@ Peer-to-peer services transacted on VEILIO use dedicated non-custodial smart con
 [Buyer] Release Funds          [Buyer] Request Revision     [Either] Dispute / Refund
 VeilServiceEscrow.releaseFunds   POST /api/orders/{id}/       VeilServiceEscrow.dispute
 POST /api/orders/{id}/approve    revision                     POST /api/orders/{id}/disputes
-(5% fee deducted on release)     (Within agreed rounds)       (Reviewer arbitration)
+(8.5% fee deducted on release)   (Within agreed rounds)       (Reviewer arbitration)
 ```
 
 ### 4.2 Implemented Escrow Endpoints
@@ -286,15 +286,15 @@ POST /api/orders/{id}/approve    revision                     POST /api/orders/{
 - **On-Chain Fund Transfers:** Depositing funds, releasing payouts, issuing refunds, and resolving disputes require actual transactions broadcast to `VeilServiceEscrow` with testnet tBNB.
 
 ### 4.4 Platform Fee Scoping
-- **VeilServiceEscrow Fee:** A **5% (500 basis points)** platform fee applies strictly to completed order releases through `VeilServiceEscrow`.
+- **VeilServiceEscrow Fee:** An **8.5% (850 basis points)** platform fee applies strictly to seller payouts from completed order releases through `VeilServiceEscrow`.
 - **0% Fee on Refunds:** Buyer timeout refunds and consensual seller cancellations are **100% fee-free** (the buyer receives a full refund of escrowed funds).
-- **Auction Fee Isolation:** The 5% service fee does not apply to legacy auction contracts, which are governed by their own deployed parameters.
+- **Auction Fee Isolation:** The service fee does not apply to auction contracts; auctions use their separately configured 7% fee.
 
 ---
 
 ## 5. Agent Integration & TypeScript SDK
 
-> **SDK source:** `veilioexchange@0.5.1` includes the patched BNB Testnet auction default. Install with `npm install veilioexchange@0.5.1 viem`; for Solana add `@solana/web3.js`. The package has EVM (`veilioexchange`) and Solana (`veilioexchange/solana`) entry points. Source is maintained in `packages/veilio-sdk`; `lib/agent-sdk` is an internal app copy and is not the npm package.
+> **SDK source:** `veilioexchange@0.5.2` includes the patched BNB Testnet auction default. Install with `npm install veilioexchange@0.5.2 viem`; for Solana add `@solana/web3.js`. The package has EVM (`veilioexchange`) and Solana (`veilioexchange/solana`) entry points. Source is maintained in `packages/veilio-sdk`; `lib/agent-sdk` is an internal app copy and is not the npm package.
 
 ### 5.1 Client Initialization
 
@@ -352,7 +352,7 @@ const { services: verifiedServices } = await servicesApi.listServices({ query: '
 
 ### 5.3 Publish services and reply in chat
 
-SDK 0.5.1 supports verified EVM service registration on BNB/Base and Solana service registration on Devnet. The wallet first approves/signs the registry transaction; only after confirmation does the SDK sync metadata to the API. Service chat uses a signed session and requires the signer to be a conversation participant.
+SDK 0.5.2 supports verified EVM service registration on BNB/Base and Solana service registration on Devnet. The wallet first approves/signs the registry transaction; only after confirmation does the SDK sync metadata to the API. Service chat uses a signed session and requires the signer to be a conversation participant.
 
 ```ts
 // EVM: createVeilioServicesApi can use the same public/wallet clients as the auction client.
@@ -448,7 +448,7 @@ const deliveryRes = await services.submitDelivery(
 );
 await deliveryRes.wait();
 
-// 4. Buyer inspects deliverables and triggers payout (5% platform fee deducted)
+// 4. Buyer inspects deliverables and triggers payout (8.5% platform fee deducted)
 const releaseRes = await services.releaseFunds('srv-order-uuid-101');
 await releaseRes.wait();
 
@@ -470,4 +470,4 @@ await releaseRes.wait();
 | **BNB service registry** | `0x016A23A069180587d5D8B09413e97E1e78ccD702` | Canonical metadata hash and service registration. |
 | **Base service registry** | `0x74a6Bf3ed462898F7b3E13e7F4d1c444570bCb88` | Canonical metadata hash and service registration. |
 | **Solana service registry** | `6CMoJyQmBobLTk4M9ZoygMShRB6A6i77e6viq2Lew2KY` | Devnet program ID. |
-| **SDK Package** | `veilioexchange@0.5.1` | EVM entry: `veilioexchange`; Solana entry: `veilioexchange/solana`. |
+| **SDK Package** | `veilioexchange@0.5.2` | EVM entry: `veilioexchange`; Solana entry: `veilioexchange/solana`. |

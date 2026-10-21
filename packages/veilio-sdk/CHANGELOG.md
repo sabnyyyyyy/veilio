@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2
+
+- Align auction fees to 700 bps (7%) and service escrow maximums/defaults to 850 bps (8.5%).
+- Update BNB Testnet and Base Sepolia auction/escrow defaults to the newly deployed contracts.
+- Add the Solana auction fee configuration and fee-recipient accounts to settlement instruction builders.
+
 ## 0.5.1
 
 - Point the BNB Testnet auction default to the patched VeilNFTV4 deployment that rejects zero bid commitments.

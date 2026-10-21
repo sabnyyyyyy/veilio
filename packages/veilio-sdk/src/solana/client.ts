@@ -25,10 +25,13 @@ import {
   createRevealBidInstruction,
   createSettleAuctionInstruction,
   decodeAuctionConfigAccount,
+  decodeAuctionFeeConfigAccount,
   decodeAuctionStateAccount,
   findAuctionConfigPda,
+  findAuctionFeeConfigPda,
   findAuctionPda,
   type DecodedAuctionConfig,
+  type DecodedAuctionFeeConfig,
   type DecodedAuctionState,
 } from './auction.js';
 import {
@@ -253,6 +256,21 @@ export function createVeilioSolanaClient(options: VeilioSolanaClientOptions) {
     return account ? decodeAuctionConfigAccount(account.data) : null;
   }
 
+  /** Global auction fee configuration, or null until the platform treasury is initialized. */
+  async function getAuctionFeeConfig(): Promise<DecodedAuctionFeeConfig | null> {
+    const { pda } = findAuctionFeeConfigPda(auctionProgramId);
+    const account = await connection.getAccountInfo(new PublicKey(pda), commitment);
+    return account ? decodeAuctionFeeConfigAccount(account.data) : null;
+  }
+
+  async function requireAuctionFeeRecipient(): Promise<string> {
+    const config = await getAuctionFeeConfig();
+    if (!config) {
+      throw new VeilioSdkError({ code: 'INVALID_CONFIG', message: 'Solana auction fee config is not initialized on this program.' });
+    }
+    return config.feeRecipient;
+  }
+
   async function getAuction(auctionId: bigint | number | string): Promise<DecodedAuctionState | null> {
     const { pda } = findAuctionPda(BigInt(auctionId), auctionProgramId);
     const account = await connection.getAccountInfo(new PublicKey(pda), commitment);
@@ -395,12 +413,14 @@ export function createVeilioSolanaClient(options: VeilioSolanaClientOptions) {
 
   /** Winner accepts the asset during inspection, releasing payment to the seller. */
   async function acceptDataset(auctionId: bigint | number | string, seller: string): Promise<string> {
+    const feeRecipient = await requireAuctionFeeRecipient();
     return send(
       createAcceptDatasetInstruction({
         programId: auctionProgramId,
         auctionId: BigInt(auctionId),
         seller,
         winner: requireSigner().publicKey.toBase58(),
+        feeRecipient,
       })
     );
   }
@@ -454,6 +474,7 @@ export function createVeilioSolanaClient(options: VeilioSolanaClientOptions) {
   async function finalizeInspectionTimeout(auctionId: bigint | number | string): Promise<string> {
     const caller = requireSigner().publicKey.toBase58();
     const auction = await requireAuction(auctionId);
+    const feeRecipient = await requireAuctionFeeRecipient();
     if (auction.state !== SolanaAuctionState.Inspection) {
       throw new VeilioSdkError({ code: 'INVALID_INPUT', message: 'Auction is not in Inspection.' });
     }
@@ -464,6 +485,7 @@ export function createVeilioSolanaClient(options: VeilioSolanaClientOptions) {
         seller: auction.seller,
         winner: auction.highestBidder,
         caller,
+        feeRecipient,
       })
     );
   }
@@ -550,7 +572,7 @@ export function createVeilioSolanaClient(options: VeilioSolanaClientOptions) {
     );
   }
 
-  /** Buyer releases escrow to the seller (5% fee to feeRecipient). Accounts are read from the order. */
+  /** Buyer releases escrow to the seller (8.5% fee on seller payout). Accounts are read from the order. */
   async function releaseFunds(orderId: string): Promise<string> {
     const order = await getEscrowOrder(orderId);
     if (!order) throw new VeilioSdkError({ code: 'NOT_FOUND', message: `Escrow order ${orderId} not found on Solana.` });
@@ -615,6 +637,7 @@ export function createVeilioSolanaClient(options: VeilioSolanaClientOptions) {
     auctionProgramId,
     escrowProgramId,
     getAuctionConfig,
+    getAuctionFeeConfig,
     getAuction,
     listAuctions,
     createAuction,

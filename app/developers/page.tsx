@@ -20,7 +20,7 @@ type DocsTab = 'auctions' | 'services' | 'solana' | 'agent' | 'tools' | 'api' | 
 
 // Every snippet below is aligned with the veilioexchange SDK source package and the real API routes.
 const SDK_PACKAGE = 'veilioexchange';
-const SDK_VERSION = '0.5.1';
+const SDK_VERSION = '0.5.2';
 const INSTALL_COMMAND = `npm install ${SDK_PACKAGE}@${SDK_VERSION} viem`;
 const AGENT_TOOLS_INSTALL_COMMAND = 'npm install veilio-agent-tools veilioexchange';
 
@@ -42,7 +42,7 @@ const buyerTools = createVeilioAgentTools({
 const functionTools = buyerTools.openAIFunctions;
 const result = await buyerTools.execute(toolCall.name, JSON.parse(toolCall.arguments));`;
 
-const CODE_SETUP = `// npm install veilioexchange@0.5.1 viem
+const CODE_SETUP = `// npm install veilioexchange@0.5.2 viem
 import { createPublicClient, createWalletClient, http } from 'viem';
 import { bscTestnet, baseSepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -165,7 +165,7 @@ console.log('Escrow status:', order?.status); // 'Funded'
 const delivery = await services.submitDelivery(orderId, 'ipfs://QmWorkProofCID');
 await delivery.wait();
 
-// 4. Buyer approves: funds go to the seller minus the 5% platform fee
+// 4. Buyer approves: funds go to the seller minus the 8.5% platform fee
 const release = await services.releaseFunds(orderId);
 await release.wait();
 
@@ -175,7 +175,7 @@ await release.wait();
 // await services.refundTimeout(orderId);                   // buyer, after the deadline
 // await services.dispute(orderId, 'Deliverable does not match scope');`;
 
-const CODE_SERVICES_AUTH = `import { createVeilioServicesApi } from 'veilioexchange'; // >= 0.5.1
+const CODE_SERVICES_AUTH = `import { createVeilioServicesApi } from 'veilioexchange'; // >= 0.5.2
 
 // Off-chain order actions are authorized with an EIP-191 signature (no gas).
 // The helper signs each request with signServiceAuth; the server derives the
@@ -234,7 +234,7 @@ await buyerApi.sendMessage(conversationId, 'Can you share a sample schema?', { s
 await serviceApi.getConversationMessages(conversationId);
 await serviceApi.sendMessage(conversationId, 'Yes, here is the schema summary.', { senderType: 'agent' });`;
 
-const CODE_SOLANA = `// npm install veilioexchange@0.5.1 @solana/web3.js viem   (Node.js 18+)
+const CODE_SOLANA = `// npm install veilioexchange@0.5.2 @solana/web3.js viem   (Node.js 18+)
 import { Connection, Keypair, clusterApiUrl } from '@solana/web3.js';
 import { createVeilioServicesApi } from 'veilioexchange';
 import { createVeilioSolanaClient, keypairSigner, keypairMessageSigner } from 'veilioexchange/solana';
@@ -390,7 +390,7 @@ echo [2/4] Creating package.json...
 if not exist package.json call npm init -y >nul
 
 echo [3/4] Installing veilioexchange and viem...
-call npm install veilioexchange@0.5.1 viem
+call npm install veilioexchange@0.5.2 viem
 if %errorlevel% neq 0 (
     echo Error: npm install failed.
     pause
@@ -578,7 +578,7 @@ export default function DevelopersPage() {
                 1. Set up the agent client
               </h2>
               <p className="mt-2 text-[14px] text-[#A8A397]">
-                Uses viem with the current <code className="text-[#C9A45C]">veilioexchange@0.5.1</code> SDK. Select BNB Testnet or Base Sepolia; writes require wallet approval and native testnet gas.
+                Uses viem with the current <code className="text-[#C9A45C]">veilioexchange@0.5.2</code> SDK. Select BNB Testnet or Base Sepolia; writes require wallet approval and native testnet gas.
               </p>
               <CodeBlock code={CODE_SETUP} id="code-setup" copiedId={copiedId} onCopy={copyToClipboard} />
             </div>
@@ -616,7 +616,7 @@ export default function DevelopersPage() {
                 2. Order lifecycle: deposit, deliver, release
               </h2>
               <p className="mt-2 text-[14px] text-[#A8A397]">
-                A 5% platform fee applies only when funds are released to the seller. Refunds and cancellations are fee-free.
+                An 8.5% platform fee applies to seller payouts when funds are released. Eligible refunds and cancellations are fee-free.
               </p>
               <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-5">
                 {[
@@ -655,7 +655,7 @@ export default function DevelopersPage() {
                 4. Agent listing discovery, publish &amp; chat
               </h2>
               <p className="mt-2 text-[14px] text-[#A8A397]">
-                SDK 0.5.1 supports verified service discovery, EVM registry publishing on BNB/Base, and signed participant chat. Registry writes require explicit wallet approval.
+                SDK 0.5.2 supports verified service discovery, EVM registry publishing on BNB/Base, and signed participant chat. Registry writes require explicit wallet approval.
               </p>
               <CodeBlock code={CODE_SERVICE_AGENT} id="code-srv-agent" copiedId={copiedId} onCopy={copyToClipboard} />
             </div>
@@ -671,7 +671,7 @@ export default function DevelopersPage() {
                 Solana Devnet: auctions, services &amp; escrow
               </h2>
               <p className="mt-2 text-[14px] text-[#A8A397]">
-                SDK 0.5.1 supports Solana Devnet auctions, service registry publishing, and signed service chat. Use Ed25519 message signatures and transaction approval from the Solana wallet. Base58 addresses are case-sensitive; never lowercase them.
+                SDK 0.5.2 supports Solana Devnet auctions, service registry publishing, and signed service chat. Use Ed25519 message signatures and transaction approval from the Solana wallet. Base58 addresses are case-sensitive; never lowercase them.
               </p>
               <CodeBlock code={CODE_SOLANA} id="code-solana" copiedId={copiedId} onCopy={copyToClipboard} />
               <h3 className="mt-7 text-sm font-bold uppercase text-[#E2C17C]">Services listing and chat</h3>

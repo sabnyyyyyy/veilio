@@ -37,7 +37,7 @@ abstract contract ReentrancyGuard {
  *    - Once in `Delivered` status, buyers cannot trigger a unilateral timeout refund; they must approve or dispute.
  *    - Buyers can only trigger timeout refunds if `order.status == EscrowStatus.Funded` and deadline has passed.
  * 5. Platform Fee:
- *    - Fee basis points capped at `MAX_FEE_BPS = 500` (5%).
+ *    - Fee basis points capped at `MAX_FEE_BPS = 850` (8.5%).
  *    - Applied only to seller payouts in `releaseFunds` and `resolveDispute`.
  *    - Refunds are 100% fee-free for the buyer.
  *    - The fee rate is snapshotted per order at deposit (`orderFeeBps`); later `setFeeConfig` changes
@@ -88,7 +88,7 @@ contract VeilServiceEscrow is ReentrancyGuard {
     address public reviewer;
     address payable public feeRecipient;
     uint256 public platformFeeBasisPoints; // e.g. 100 = 1%
-    uint256 public constant MAX_FEE_BPS = 500; // max 5%
+    uint256 public constant MAX_FEE_BPS = 850; // max 8.5%
 
     mapping(bytes32 => EscrowOrder) public orders;
     mapping(address => uint256) public pendingWithdrawals;

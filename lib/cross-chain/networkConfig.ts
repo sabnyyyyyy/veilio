@@ -9,10 +9,14 @@ import { CanonicalNetworkId, ChainFamily, NetworkEnvironment } from './types';
 
 // Keep in sync with lib/contract.ts (VEIL_V3_CONTRACT_ADDRESS): the active BNB
 // auction is VeilNFTV4, which is also the NFT custody contract.
-const PATCHED_BNB_TESTNET_AUCTION_ADDRESS = '0x9e2d9Dcc76192b54eBF0106da09787428eAF3EE7';
+const PATCHED_BNB_TESTNET_AUCTION_ADDRESS = '0xae24bceed5f7BFb662AE170CA4C8bB4Fd4209FEf';
+const PREVIOUS_PATCHED_BNB_TESTNET_AUCTION_ADDRESS = '0x9e2d9Dcc76192b54eBF0106da09787428eAF3EE7';
 const AFFECTED_BNB_TESTNET_AUCTION_ADDRESS = '0xc12ecd53b9dae1753409b87f10bf00684bf7d8b1';
 const configuredBnbAuctionAddress = process.env.NEXT_PUBLIC_V4_CONTRACT_ADDRESS || process.env.NEXT_PUBLIC_V3_CONTRACT_ADDRESS;
-const BNB_TESTNET_AUCTION_ADDRESS = configuredBnbAuctionAddress?.toLowerCase() === AFFECTED_BNB_TESTNET_AUCTION_ADDRESS
+const BNB_TESTNET_AUCTION_ADDRESS = [
+  AFFECTED_BNB_TESTNET_AUCTION_ADDRESS,
+  PREVIOUS_PATCHED_BNB_TESTNET_AUCTION_ADDRESS.toLowerCase(),
+].includes(configuredBnbAuctionAddress?.toLowerCase() || '')
   ? PATCHED_BNB_TESTNET_AUCTION_ADDRESS
   : configuredBnbAuctionAddress || PATCHED_BNB_TESTNET_AUCTION_ADDRESS;
 
@@ -62,7 +66,9 @@ export const NETWORK_REGISTRY: Record<CanonicalNetworkId, NetworkConfig> = {
     explorerUrl: 'https://testnet.bscscan.com',
     contracts: {
       auction: BNB_TESTNET_AUCTION_ADDRESS,
-      serviceEscrow: process.env.NEXT_PUBLIC_SERVICE_ESCROW_CONTRACT_ADDRESS || '0xEd83D9f97c01a94d235927704638d6e765501f50',
+      serviceEscrow: (process.env.NEXT_PUBLIC_SERVICE_ESCROW_CONTRACT_ADDRESS?.toLowerCase() === '0xed83d9f97c01a94d235927704638d6e765501f50'
+        ? '0x16121bD0CA81867aF5395430C1d640154C7cB36A'
+        : process.env.NEXT_PUBLIC_SERVICE_ESCROW_CONTRACT_ADDRESS || '0x16121bD0CA81867aF5395430C1d640154C7cB36A'),
       serviceRegistry: process.env.NEXT_PUBLIC_SERVICE_REGISTRY_CONTRACT_ADDRESS || '0x016A23A069180587d5D8B09413e97E1e78ccD702',
       nftCustody: BNB_TESTNET_AUCTION_ADDRESS,
     },
@@ -106,8 +112,12 @@ export const NETWORK_REGISTRY: Record<CanonicalNetworkId, NetworkConfig> = {
     ],
     explorerUrl: 'https://sepolia.basescan.org',
     contracts: {
-      auction: process.env.NEXT_PUBLIC_BASE_SEPOLIA_AUCTION_ADDRESS || '0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1',
-      serviceEscrow: process.env.NEXT_PUBLIC_BASE_SEPOLIA_SERVICE_ESCROW_ADDRESS || '0x9679f83560076921f364574Ff341c37B7fcFd9A4',
+      auction: (process.env.NEXT_PUBLIC_BASE_SEPOLIA_AUCTION_ADDRESS?.toLowerCase() === '0xc12ecd53b9dae1753409b87f10bf00684bf7d8b1'
+        ? '0xbac318dE378Ac19d5aBB93076feAa131eE649Bc6'
+        : process.env.NEXT_PUBLIC_BASE_SEPOLIA_AUCTION_ADDRESS || '0xbac318dE378Ac19d5aBB93076feAa131eE649Bc6'),
+      serviceEscrow: (process.env.NEXT_PUBLIC_BASE_SEPOLIA_SERVICE_ESCROW_ADDRESS?.toLowerCase() === '0x9679f83560076921f364574ff341c37b7fcfd9a4'
+        ? '0xcF7364F64a161f2460cFbFC707dDa51baFb8131F'
+        : process.env.NEXT_PUBLIC_BASE_SEPOLIA_SERVICE_ESCROW_ADDRESS || '0xcF7364F64a161f2460cFbFC707dDa51baFb8131F'),
       serviceRegistry: process.env.NEXT_PUBLIC_BASE_SEPOLIA_SERVICE_REGISTRY_ADDRESS || '0x74a6Bf3ed462898F7b3E13e7F4d1c444570bCb88',
     },
     finalityConfig: {

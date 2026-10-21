@@ -63,7 +63,7 @@ async function main() {
   // 4. Validate Constructor Arguments for VeilServiceEscrow
   const reviewerAddress = process.env.REVIEWER_ADDRESS || deployer.address;
   const feeRecipientAddress = process.env.FEE_RECIPIENT_ADDRESS || deployer.address;
-  const rawFeeBps = process.env.INITIAL_FEE_BPS || "500";
+  const rawFeeBps = process.env.INITIAL_FEE_BPS || "850";
   const initialFeeBps = parseInt(rawFeeBps, 10);
 
   if (!ethers.isAddress(reviewerAddress)) {
@@ -71,6 +71,9 @@ async function main() {
   }
   if (!ethers.isAddress(feeRecipientAddress)) {
     throw new Error(`Invalid FEE_RECIPIENT_ADDRESS: ${feeRecipientAddress}`);
+  }
+  if (!Number.isInteger(initialFeeBps) || initialFeeBps < 0 || initialFeeBps > 850) {
+    throw new Error("INITIAL_FEE_BPS must be between 0 and 850 (max 8.5%).");
   }
 
   console.log("\n2/2 Deploying VeilServiceEscrow on Base Sepolia...");

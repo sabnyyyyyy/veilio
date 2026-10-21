@@ -24,7 +24,7 @@ describe('VEILIO Milestone 1 — Cross-Chain Adapters', () => {
       expect(config.environment).to.equal('testnet');
       expect(config.displayName).to.equal('BNB Smart Chain Testnet');
       expect(config.verificationStatus).to.equal('verified_active');
-      expect(config.contracts.auction).to.equal('0x9e2d9Dcc76192b54eBF0106da09787428eAF3EE7');
+      expect(config.contracts.auction).to.equal('0xae24bceed5f7BFb662AE170CA4C8bB4Fd4209FEf');
       expect(config.contracts.nftCustody).to.equal(config.contracts.auction);
     });
 
@@ -43,7 +43,7 @@ describe('VEILIO Milestone 1 — Cross-Chain Adapters', () => {
       expect(config.displayName).to.equal('Base Sepolia');
       expect(config.rpcEndpoints[0]).to.include('sepolia.base.org');
       expect(config.verificationStatus).to.be.oneOf(['in_development', 'verified_active']);
-      expect(config.contracts.auction).to.equal('0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1');
+      expect(config.contracts.auction).to.equal('0xbac318dE378Ac19d5aBB93076feAa131eE649Bc6');
       expect(config.marketplaceCapability).to.be.oneOf(['integration_pending', 'live']);
       expect(getEvmChain('base:84532').id).to.equal(84532);
     });

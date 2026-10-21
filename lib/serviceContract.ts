@@ -20,10 +20,13 @@ export const VEIL_SERVICE_REGISTRY_ABI = VeilServiceRegistryArtifact.abi;
 // ============================================================================
 // Base Sepolia Testnet (Chain ID 84532)
 // ============================================================================
+const previousBaseSepoliaEscrowAddress = '0x9679f83560076921f364574ff341c37b7fcfd9a4';
+const configuredBaseSepoliaEscrowAddress = process.env.NEXT_PUBLIC_BASE_SEPOLIA_SERVICE_ESCROW_ADDRESS ||
+  process.env.BASE_SEPOLIA_SERVICE_ESCROW_ADDRESS;
 export const BASE_SEPOLIA_SERVICE_ESCROW_CONTRACT_ADDRESS = (
-  process.env.NEXT_PUBLIC_BASE_SEPOLIA_SERVICE_ESCROW_ADDRESS ||
-  process.env.BASE_SEPOLIA_SERVICE_ESCROW_ADDRESS ||
-  '0x9679f83560076921f364574Ff341c37B7fcFd9A4'
+  configuredBaseSepoliaEscrowAddress?.toLowerCase() === previousBaseSepoliaEscrowAddress
+    ? '0xcF7364F64a161f2460cFbFC707dDa51baFb8131F'
+    : configuredBaseSepoliaEscrowAddress || '0xcF7364F64a161f2460cFbFC707dDa51baFb8131F'
 ) as `0x${string}`;
 
 export const BASE_SEPOLIA_SERVICE_REGISTRY_CONTRACT_ADDRESS = (

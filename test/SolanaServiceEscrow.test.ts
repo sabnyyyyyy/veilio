@@ -303,7 +303,7 @@ describe('VEILIO Phase 4 — Solana Services Escrow Program & Client Suite', () 
       amountBuf.writeBigUInt64LE(amount);
 
       const feeBpsBuf = Buffer.alloc(2);
-      feeBpsBuf.writeUInt16LE(500);
+      feeBpsBuf.writeUInt16LE(850);
 
       const deadlineBuf = Buffer.alloc(8);
       deadlineBuf.writeBigInt64LE(1775550000n);
@@ -355,7 +355,7 @@ describe('VEILIO Phase 4 — Solana Services Escrow Program & Client Suite', () 
       expect(decoded.orderIdHex).to.equal(validOrderIdHex);
       expect(decoded.amountLamports).to.equal(1_000_000_000n);
       expect(decoded.amountSol).to.equal('1.0000');
-      expect(decoded.feeBasisPoints).to.equal(500);
+      expect(decoded.feeBasisPoints).to.equal(850);
       expect(decoded.status).to.equal('Funded');
       expect(decoded.deliverableReference).to.equal('ipfs://mockcid');
       expect(decoded.bump).to.equal(254);
@@ -375,23 +375,23 @@ describe('VEILIO Phase 4 — Solana Services Escrow Program & Client Suite', () 
   });
 
   // ==========================================================================
-  // 7. Exact 5% Platform Fee & Multi-Chain Accounting Parity
+  // 7. Exact 8.5% Platform Fee & Multi-Chain Accounting Parity
   // ==========================================================================
   describe('Fee Calculation Parity (SEC-FEE-01)', () => {
-    it('calculates exact 5% platform fee on 100% seller release (0.1 SOL = 100,000,000 lamports)', () => {
+    it('calculates exact 8.5% platform fee on 100% seller release (0.1 SOL = 100,000,000 lamports)', () => {
       const totalLamports = 100_000_000n; // 0.1 SOL
-      const payouts = calculateSolanaServicePayouts(totalLamports, 0, 500);
+      const payouts = calculateSolanaServicePayouts(totalLamports, 0, 850);
 
       expect(payouts.buyerRefundLamports).to.equal(0n);
       expect(payouts.sellerGrossLamports).to.equal(100_000_000n);
-      expect(payouts.platformFeeLamports).to.equal(5_000_000n); // 0.005 SOL (exact 5%)
-      expect(payouts.sellerNetPayoutLamports).to.equal(95_000_000n); // 0.095 SOL (exact 95%)
+      expect(payouts.platformFeeLamports).to.equal(8_500_000n); // 0.0085 SOL (exact 8.5%)
+      expect(payouts.sellerNetPayoutLamports).to.equal(91_500_000n); // 0.0915 SOL (exact 91.5%)
       expect(payouts.platformFeeLamports + payouts.sellerNetPayoutLamports).to.equal(totalLamports);
     });
 
     it('calculates 100% fee-free refund for buyer on cancellation or timeout', () => {
       const totalLamports = 250_000_000n; // 0.25 SOL
-      const payouts = calculateSolanaServicePayouts(totalLamports, 100, 500);
+      const payouts = calculateSolanaServicePayouts(totalLamports, 100, 850);
 
       expect(payouts.buyerRefundLamports).to.equal(250_000_000n);
       expect(payouts.sellerGrossLamports).to.equal(0n);
@@ -402,12 +402,12 @@ describe('VEILIO Phase 4 — Solana Services Escrow Program & Client Suite', () 
     it('calculates dispute split: fee applies strictly to seller gross payout', () => {
       const totalLamports = 1_000_000_000n; // 1 SOL
       // 60% buyer refund, 40% seller gross award
-      const payouts = calculateSolanaServicePayouts(totalLamports, 60, 500);
+      const payouts = calculateSolanaServicePayouts(totalLamports, 60, 850);
 
       expect(payouts.buyerRefundLamports).to.equal(600_000_000n); // 0.6 SOL fee-free
       expect(payouts.sellerGrossLamports).to.equal(400_000_000n); // 0.4 SOL gross
-      expect(payouts.platformFeeLamports).to.equal(20_000_000n);  // 0.02 SOL (5% of 0.4 SOL)
-      expect(payouts.sellerNetPayoutLamports).to.equal(380_000_000n); // 0.38 SOL net
+      expect(payouts.platformFeeLamports).to.equal(34_000_000n);  // 0.034 SOL (8.5% of 0.4 SOL)
+      expect(payouts.sellerNetPayoutLamports).to.equal(366_000_000n); // 0.366 SOL net
       expect(payouts.buyerRefundLamports + payouts.platformFeeLamports + payouts.sellerNetPayoutLamports).to.equal(totalLamports);
     });
   });
@@ -486,9 +486,9 @@ describe('VEILIO Phase 4 — Solana Services Escrow Program & Client Suite', () 
       expect(encodeBase58(handOver.data.subarray(74, 106))).to.equal(sellerWallet);
     });
 
-    it('rejects fee bps above the 5% cap, non-integers, and default / malformed keys', () => {
+    it('rejects fee bps above the 8.5% cap, non-integers, and default / malformed keys', () => {
       const base = { programId: dummyProgramId, admin: adminWallet, reviewer: reviewerWallet, feeRecipient: feeWallet };
-      expect(() => createInitializeEscrowConfigInstruction({ ...base, feeBasisPoints: MAX_FEE_BPS + 1 })).to.throw(/between 0 and 500/);
+      expect(() => createInitializeEscrowConfigInstruction({ ...base, feeBasisPoints: MAX_FEE_BPS + 1 })).to.throw(/between 0 and 850/);
       expect(() => createInitializeEscrowConfigInstruction({ ...base, feeBasisPoints: 1.5 })).to.throw(/integer/);
       expect(() => createInitializeEscrowConfigInstruction({ ...base, feeBasisPoints: -1 })).to.throw();
       expect(() => createInitializeEscrowConfigInstruction({ ...base, reviewer: SYSTEM_PROGRAM_ID, feeBasisPoints: 500 })).to.throw(/default/);

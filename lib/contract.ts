@@ -25,13 +25,15 @@ if (!process.env.NEXT_PUBLIC_V3_CONTRACT_ADDRESS) {
   console.warn("NEXT_PUBLIC_V3_CONTRACT_ADDRESS is not configured");
 }
 
-const PATCHED_BNB_V4_ADDRESS = '0x9e2d9Dcc76192b54eBF0106da09787428eAF3EE7' as const;
+const PATCHED_BNB_V4_ADDRESS = '0xae24bceed5f7BFb662AE170CA4C8bB4Fd4209FEf' as const;
+const PREVIOUS_PATCHED_BNB_V4_ADDRESS = '0x9e2d9Dcc76192b54eBF0106da09787428eAF3EE7';
 const AFFECTED_BNB_V4_ADDRESS = '0xc12ecd53b9dae1753409b87f10bf00684bf7d8b1';
 const configuredV4Address = process.env.NEXT_PUBLIC_V4_CONTRACT_ADDRESS;
-// The old BNB V4 is immutable and has a zero-commitment accounting bug. Never
-// let a stale hosting environment variable silently route BNB auctions back to it.
+// Both earlier BNB V4 deployments are superseded. Never let stale hosting
+// environment variables silently route new auctions to an old test deployment.
 export const VEIL_V4_CONTRACT_ADDRESS = (
-  configuredV4Address?.toLowerCase() === AFFECTED_BNB_V4_ADDRESS
+  configuredV4Address?.toLowerCase() === AFFECTED_BNB_V4_ADDRESS ||
+  configuredV4Address?.toLowerCase() === PREVIOUS_PATCHED_BNB_V4_ADDRESS.toLowerCase()
     ? PATCHED_BNB_V4_ADDRESS
     : configuredV4Address
 ) as `0x${string}` | undefined;
@@ -44,8 +46,12 @@ export const VEIL_V3_ABI = (VEIL_V4_CONTRACT_ADDRESS || VEIL_V3_CONTRACT_ADDRESS
   ? VeilNFTV4Artifact.abi
   : VeilV3Artifact.abi;
 
+const PREVIOUS_BASE_SEPOLIA_AUCTION_ADDRESS = '0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1';
+const configuredBaseAuctionAddress = process.env.NEXT_PUBLIC_BASE_SEPOLIA_AUCTION_ADDRESS;
 export const BASE_SEPOLIA_AUCTION_ADDRESS = (
-  process.env.NEXT_PUBLIC_BASE_SEPOLIA_AUCTION_ADDRESS || '0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1'
+  configuredBaseAuctionAddress?.toLowerCase() === PREVIOUS_BASE_SEPOLIA_AUCTION_ADDRESS.toLowerCase()
+    ? '0xbac318dE378Ac19d5aBB93076feAa131eE649Bc6'
+    : configuredBaseAuctionAddress || '0xbac318dE378Ac19d5aBB93076feAa131eE649Bc6'
 ) as `0x${string}`;
 
 export function getAuctionContractConfig(chainId: number) {

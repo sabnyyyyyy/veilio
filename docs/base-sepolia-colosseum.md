@@ -21,7 +21,7 @@ Then deploy the same `VeilNFTV4` implementation used by the current auction app:
 npm run deploy:v4:base-sepolia
 ```
 
-The deployment script checks the RPC chain ID and validates both role addresses before sending the transaction. The configured auction address is `0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1`. Confirm bytecode and expected roles with `BASE_SEPOLIA_AUCTION_ADDRESS=0x... npm run verify:v4:base-sepolia` before using a deployment; configuration alone is not proof that the target RPC currently has the expected contract.
+The deployment script checks the RPC chain ID and validates both role addresses before sending the transaction. The configured auction address is `0xbac318dE378Ac19d5aBB93076feAa131eE649Bc6`. Confirm bytecode and expected roles with `BASE_SEPOLIA_AUCTION_ADDRESS=0x... npm run verify:v4:base-sepolia` before using a deployment; configuration alone is not proof that the target RPC currently has the expected contract.
 
 ## Checks to complete before a public launch
 

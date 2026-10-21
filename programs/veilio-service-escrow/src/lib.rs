@@ -6,7 +6,7 @@ declare_id!("5Vj4y8BT74PDe5VwLuDp9agTR5ak4vtZdwxnBfRW3R8s");
 pub const ESCROW_SEED: &[u8] = b"service_escrow";
 pub const VAULT_SEED: &[u8] = b"service_vault";
 pub const MAX_DELIVERABLE_REF_LEN: usize = 200;
-pub const MAX_FEE_BPS: u16 = 500; // 5% maximum platform fee
+pub const MAX_FEE_BPS: u16 = 850; // 8.5% maximum platform fee
 /// Global platform configuration PDA: [b"escrow_config"].
 pub const CONFIG_SEED: &[u8] = b"escrow_config";
 
@@ -505,10 +505,16 @@ pub struct InitializeConfig<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
 
-    #[account(constraint = program.programdata_address()? == Some(program_data.key()) @ EscrowError::UnauthorizedAdmin)]
-    pub program: Program<'info, crate::program::VeilioServiceEscrow>,
+    /// CHECK: The address is fixed to this program and ProgramData is validated below.
+    #[account(address = crate::ID)]
+    pub program: UncheckedAccount<'info>,
 
-    #[account(constraint = program_data.upgrade_authority_address == Some(admin.key()) @ EscrowError::UnauthorizedAdmin)]
+    #[account(
+        seeds = [program.key().as_ref()],
+        bump,
+        seeds::program = anchor_lang::solana_program::bpf_loader_upgradeable::ID,
+        constraint = program_data.upgrade_authority_address == Some(admin.key()) @ EscrowError::UnauthorizedAdmin
+    )]
     pub program_data: Account<'info, ProgramData>,
 
     pub system_program: Program<'info, System>,
@@ -882,7 +888,7 @@ pub enum EscrowError {
     UnauthorizedAdmin,
     #[msg("Invalid platform configuration")]
     InvalidConfig,
-    #[msg("Platform fee exceeds the 5% maximum")]
+    #[msg("Platform fee exceeds the 8.5% maximum")]
     FeeTooHigh,
     #[msg("The platform reviewer cannot be the buyer or seller of this order")]
     ReviewerNotIndependent,

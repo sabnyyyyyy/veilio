@@ -19,7 +19,7 @@ The web app is the marketplace interface. Developers can use the TypeScript SDK,
 
 Packages:
 
-- [`veilioexchange`](packages/veilio-sdk) — TypeScript clients for auctions, service registry/chat API, and escrow. Install with `npm install veilioexchange@0.5.1 viem`; Solana integrations also use `@solana/web3.js` and import from `veilioexchange/solana`.
+- [`veilioexchange`](packages/veilio-sdk) — TypeScript clients for auctions, service registry/chat API, and escrow. Install with `npm install veilioexchange@0.5.2 viem`; Solana integrations also use `@solana/web3.js` and import from `veilioexchange/solana`.
 - [`veilio-agent-tools`](packages/veilio-agent-tools) — agent-facing schemas and guarded handlers for bidder and service-buyer actions. Install with `npm install veilio-agent-tools veilioexchange`.
 
 `veilio-agent-tools` does not include a ready-made adapter for a specific agent framework or an MCP server. The integrating developer supplies an `operations` bridge to the SDK clients, a real human-approval flow, and durable encrypted storage for sealed-bid secrets. Read its [package guide](packages/veilio-agent-tools/README.md) before integrating it. The packages do not receive or manage users' private keys.
@@ -94,17 +94,18 @@ Commit-reveal is a hash-based sealed-bid mechanism, **not a zero-knowledge proof
 ## Deployment and safety notes
 
 - All listed networks are testnets. Do not use valuable assets or funds.
-- The BNB auction contract **has been redeployed with the zero-commitment fix**. The SDK now targets `0x9e2d9Dcc76192b54eBF0106da09787428eAF3EE7`. The previous BNB deployment at `0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1` is immutable and has the issue; old auctions remain there and are not migrated. See the [contract security note](docs/auction-and-asset-operations.md#contract-security-deployment-note).
+- Auction fees are 7% on BNB Testnet, Base Sepolia, and Solana Devnet; service escrow fees are 8.5% on those networks. Eligible refunds remain fee-free. The EVM deployments were read back on-chain and the Solana fee configs were verified after program upgrades.
+- The active BNB auction is `0xae24bceed5f7BFb662AE170CA4C8bB4Fd4209FEf`; the active Base Sepolia auction is `0xbac318dE378Ac19d5aBB93076feAa131eE649Bc6`. The previous BNB deployment at `0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1` is immutable and has a zero-commitment issue; old auctions remain there and are not migrated. See the [contract security note](docs/auction-and-asset-operations.md#contract-security-deployment-note).
 - The deployment defaults currently recorded by the SDK are:
 
   | Network | Auction | Service registry | Service escrow |
   | --- | --- | --- | --- |
-  | BNB Testnet (`97`) | `0x9e2d9Dcc76192b54eBF0106da09787428eAF3EE7` | `0x016A23A069180587d5D8B09413e97E1e78ccD702` | `0xEd83D9f97c01a94d235927704638d6e765501f50` |
-  | Base Sepolia (`84532`) | `0xc12EcD53B9dAE1753409B87f10Bf00684BF7d8B1` | `0x74a6Bf3ed462898F7b3E13e7F4d1c444570bCb88` | `0x9679f83560076921f364574Ff341c37B7fcFd9A4` |
+  | BNB Testnet (`97`) | `0xae24bceed5f7BFb662AE170CA4C8bB4Fd4209FEf` | `0x016A23A069180587d5D8B09413e97E1e78ccD702` | `0x16121bD0CA81867aF5395430C1d640154C7cB36A` |
+  | Base Sepolia (`84532`) | `0xbac318dE378Ac19d5aBB93076feAa131eE649Bc6` | `0x74a6Bf3ed462898F7b3E13e7F4d1c444570bCb88` | `0xcF7364F64a161f2460cFbFC707dDa51baFb8131F` |
   | Solana Devnet | `5Tw1iJGN1hhyRzepbD5eLoaRoZTEiKcqrh2HoZYhYEta` | `6CMoJyQmBobLTk4M9ZoygMShRB6A6i77e6viq2Lew2KY` | `5Vj4y8BT74PDe5VwLuDp9agTR5ak4vtZdwxnBfRW3R8s` |
 
-- **Base auction needs a separate security check.** Its current SDK address is the same address string as the legacy BNB deployment, but addresses are scoped to their chain. This repository does not record a patched Base replacement or establish that the Base deployment has the same issue or is unaffected. Verify the Base Sepolia bytecode and zero-commitment behavior before using it for bids; do not assume the BNB redeploy also updated Base.
-- Solana is a separate program deployment, not an EVM contract. The program IDs above are the SDK defaults; verify the deployed program and configuration on Devnet before funding an auction or service order.
+- Base Sepolia now has its own V4 deployment. Old Base auctions on the previous address stay there and are not migrated.
+- Solana is a separate program deployment, not an EVM contract. Its auction fee config is 7%, and its service escrow config is 8.5% on Devnet.
 - A code fix and manual regression checks are not an independent security audit. Review the exact deployment and risks before use.
 - On-chain timers do not execute transactions by themselves. Some NFT auction settlement/finalization paths need a keeper or another funded account to submit the permissionless transaction.
 - Service escrow transactions and app status updates are separate operations. Wait for transaction confirmation and submit the corresponding signed API update.
